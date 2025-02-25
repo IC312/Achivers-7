@@ -1,0 +1,164 @@
+// ==UserScript==
+// @name         LMS360 Ultimate Booster (Pro UI + Smooth Effects)
+// @namespace    https://lms360.edu.vn/
+// @version      6.0
+// @description  Điều chỉnh tốc độ hiệu ứng với giao diện xịn nhất + hỗ trợ iframe (Glassmorphism UI)
+// @author       Bạn
+// @match        https://lms360.edu.vn/*
+// @match        https://lms360.edu.vn/*/*
+// @grant        GM_addStyle
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @run-at       document-start
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    console.log("🚀 LMS360 Ultimate Booster Activated!");
+
+    let speed = GM_getValue("animationSpeed", 0.1);
+
+    function applyStyles(doc, speedValue) {
+        if (!doc) return;
+
+        let styleTag = doc.getElementById("custom-speed-style");
+        if (styleTag) styleTag.remove();
+
+        styleTag = doc.createElement("style");
+        styleTag.id = "custom-speed-style";
+        styleTag.innerHTML = `
+            * {
+                transition-duration: ${speedValue}s !important;
+                animation-duration: ${speedValue}s !important;
+            }
+        `;
+        doc.head.appendChild(styleTag);
+    }
+
+    function updateSpeed(newSpeed) {
+        speed = parseFloat(newSpeed);
+        if (isNaN(speed) || speed < 0) speed = 0.1;
+        GM_setValue("animationSpeed", speed);
+        applyStyles(document, speed);
+        document.querySelectorAll("iframe").forEach(iframe => {
+            try {
+                if (iframe.contentDocument) applyStyles(iframe.contentDocument, speed);
+            } catch (e) {
+                console.warn("Không thể truy cập iframe:", e);
+            }
+        });
+    }
+
+    function createSpeedControl() {
+        const panel = document.createElement("div");
+        panel.id = "speed-control-panel";
+        panel.innerHTML = `
+            <div id="speed-control-toggle">⚡</div>
+            <div id="speed-control-content">
+                <label>Tốc độ hiệu ứng:</label>
+                <input type="number" id="speed-input" value="${speed}" step="0.01" min="0">
+                <button id="apply-speed-btn">Áp dụng</button>
+            </div>
+        `;
+
+        GM_addStyle(`
+            /* Hiệu ứng kính mờ (Glassmorphism) */
+            #speed-control-panel {
+                position: fixed;
+                top: 50px;
+                left: -180px;
+                width: 180px;
+                background: rgba(255, 255, 255, 0.1);
+                backdrop-filter: blur(12px);
+                color: white;
+                padding: 12px;
+                border-radius: 15px;
+                transition: left 0.4s ease-in-out;
+                z-index: 9999;
+                font-family: 'Poppins', sans-serif;
+                box-shadow: 5px 5px 20px rgba(0, 0, 0, 0.2);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+            }
+            /* Nút kích hoạt (⚡) */
+            #speed-control-toggle {
+                position: absolute;
+                top: 50%;
+                right: -40px;
+                width: 40px;
+                height: 40px;
+                background: linear-gradient(135deg, #ffcc00, #ff8800);
+                color: black;
+                font-size: 24px;
+                text-align: center;
+                line-height: 40px;
+                border-radius: 50%;
+                cursor: pointer;
+                transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+                box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.2);
+            }
+            #speed-control-toggle:hover {
+                transform: scale(1.15);
+                box-shadow: 3px 3px 15px rgba(255, 136, 0, 0.5);
+            }
+            #speed-control-panel:hover {
+                left: 0px;
+            }
+            /* Nội dung bên trong */
+            #speed-control-content {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+                transition: opacity 0.3s ease-in-out;
+            }
+            #speed-input {
+                width: 70px;
+                padding: 6px;
+                border-radius: 8px;
+                border: none;
+                text-align: center;
+                background: rgba(255, 255, 255, 0.9);
+                font-size: 15px;
+                box-shadow: inset 2px 2px 5px rgba(0, 0, 0, 0.1);
+            }
+            /* Nút áp dụng */
+            #apply-speed-btn {
+                background: linear-gradient(135deg, #ffcc00, #ff8800);
+                color: black;
+                border: none;
+                padding: 7px 14px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: bold;
+                transition: background 0.3s ease-in-out, transform 0.1s ease-in-out, box-shadow 0.2s ease-in-out;
+            }
+            #apply-speed-btn:hover {
+                background: linear-gradient(135deg, #ffaa00, #ff5500);
+                box-shadow: 2px 2px 10px rgba(255, 136, 0, 0.4);
+            }
+            #apply-speed-btn:active {
+                transform: scale(0.95);
+            }
+        `);
+
+        document.body.appendChild(panel);
+        document.getElementById("apply-speed-btn").addEventListener("click", () => {
+            updateSpeed(document.getElementById("speed-input").value);
+        });
+    }
+
+    applyStyles(document, speed);
+
+    setInterval(() => {
+        document.querySelectorAll("iframe").forEach(iframe => {
+            try {
+                if (iframe.contentDocument) applyStyles(iframe.contentDocument, speed);
+            } catch (e) {
+                console.warn("Không thể truy cập iframe:", e);
+            }
+        });
+    }, 2000);
+
+    window.addEventListener("load", createSpeedControl);
+})();
