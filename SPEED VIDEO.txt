@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LMS 360 Speed Controller (GAY)
 // @namespace    http://tampermonkey.net/
-// @version      6.0
-// @description  Tăng tốc video LMS 360 lên đến 10x, có nút đóng/mở UI trên tất cả các frame!
+// @version      8.0
+// @description  Tăng tốc video LMS 360 lên đến 15x
 // @author       Bạn
 // @match        https://lms360.edu.vn/*
 // @match        *://*/embedded/*
@@ -71,7 +71,7 @@
         let slider = document.createElement('input');
         slider.type = 'range';
         slider.min = '0.5';
-        slider.max = '10.0';
+        slider.max = '15.0';
         slider.step = '0.1';
         slider.value = video.playbackRate;
         slider.style.width = '100%';
@@ -113,11 +113,13 @@
         let speed2xButton = createSpeedButton('2x', 2.0);
         let speed5xButton = createSpeedButton('5x', 5.0);
         let speed10xButton = createSpeedButton('10x', 10.0);
+        let speed15xButton = createSpeedButton('15x', 15.0);
 
         buttonContainer.appendChild(resetButton);
         buttonContainer.appendChild(speed2xButton);
         buttonContainer.appendChild(speed5xButton);
         buttonContainer.appendChild(speed10xButton);
+        buttonContainer.appendChild(speed15xButton);
 
         let hideButton = document.createElement('button');
         hideButton.innerText = 'Ẩn';
@@ -174,7 +176,7 @@
     function applySavedSpeed(video) {
         let savedSpeed = localStorage.getItem('lms360_video_speed');
         if (savedSpeed) {
-            video.playbackRate = parseFloat(savedSpeed);
+            video.playbackRate = Math.min(parseFloat(savedSpeed), 15.0);
         }
     }
 
