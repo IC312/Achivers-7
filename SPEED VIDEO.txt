@@ -1,0 +1,190 @@
+// ==UserScript==
+// @name         LMS 360 Speed Controller (GAY)
+// @namespace    http://tampermonkey.net/
+// @version      6.0
+// @description  Tăng tốc video LMS 360 lên đến 10x, có nút đóng/mở UI trên tất cả các frame!
+// @author       Bạn
+// @match        https://lms360.edu.vn/*
+// @match        *://*/embedded/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    function getVideoElement() {
+        let video = document.querySelector('video');
+        if (video) return video;
+
+        let iframes = document.querySelectorAll('iframe');
+        for (let iframe of iframes) {
+            try {
+                let iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                video = iframeDoc.querySelector('video');
+                if (video) return video;
+            } catch (e) {
+                console.warn('Không thể truy cập iframe:', iframe.src);
+            }
+        }
+        return null;
+    }
+
+    function createUI(video) {
+        if (document.getElementById('speedControlContainer')) return;
+
+        let container = document.createElement('div');
+        container.id = 'speedControlContainer';
+        container.style.position = 'fixed';
+        container.style.top = '15px';
+        container.style.right = '15px';
+        container.style.background = 'rgba(0,0,0,0.9)';
+        container.style.padding = '12px 18px';
+        container.style.borderRadius = '12px';
+        container.style.zIndex = '100000';
+        container.style.color = 'white';
+        container.style.fontSize = '14px';
+        container.style.textAlign = 'center';
+        container.style.boxShadow = '0px 0px 15px rgba(255,255,255,0.4)';
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.alignItems = 'center';
+        container.style.minWidth = '150px';
+
+        let title = document.createElement('div');
+        title.innerText = '🚀 Tốc độ Video';
+        title.style.fontWeight = 'bold';
+        title.style.marginBottom = '10px';
+        title.style.fontSize = '16px';
+
+        let speedLabel = document.createElement('div');
+        speedLabel.innerText = 'Tốc độ: ';
+        speedLabel.style.marginBottom = '5px';
+
+        let speedDisplay = document.createElement('span');
+        speedDisplay.id = 'speedDisplay';
+        speedDisplay.innerText = video.playbackRate + 'x';
+        speedDisplay.style.fontWeight = 'bold';
+        speedDisplay.style.color = '#00ff00';
+
+        speedLabel.appendChild(speedDisplay);
+
+        let slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0.5';
+        slider.max = '10.0';
+        slider.step = '0.1';
+        slider.value = video.playbackRate;
+        slider.style.width = '100%';
+        slider.style.marginTop = '5px';
+        slider.style.cursor = 'pointer';
+
+        slider.addEventListener('input', function() {
+            let speed = parseFloat(slider.value);
+            video.playbackRate = speed;
+            speedDisplay.innerText = speed.toFixed(1) + 'x';
+            localStorage.setItem('lms360_video_speed', speed);
+        });
+
+        let buttonContainer = document.createElement('div');
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.gap = '5px';
+        buttonContainer.style.marginTop = '10px';
+
+        function createSpeedButton(label, speed) {
+            let btn = document.createElement('button');
+            btn.innerText = label;
+            btn.style.padding = '6px 10px';
+            btn.style.border = 'none';
+            btn.style.borderRadius = '5px';
+            btn.style.background = '#007bff';
+            btn.style.color = 'white';
+            btn.style.cursor = 'pointer';
+            btn.style.fontSize = '14px';
+            btn.addEventListener('click', function() {
+                video.playbackRate = speed;
+                slider.value = speed;
+                speedDisplay.innerText = speed.toFixed(1) + 'x';
+                localStorage.setItem('lms360_video_speed', speed);
+            });
+            return btn;
+        }
+
+        let resetButton = createSpeedButton('1x', 1.0);
+        let speed2xButton = createSpeedButton('2x', 2.0);
+        let speed5xButton = createSpeedButton('5x', 5.0);
+        let speed10xButton = createSpeedButton('10x', 10.0);
+
+        buttonContainer.appendChild(resetButton);
+        buttonContainer.appendChild(speed2xButton);
+        buttonContainer.appendChild(speed5xButton);
+        buttonContainer.appendChild(speed10xButton);
+
+        let hideButton = document.createElement('button');
+        hideButton.innerText = 'Ẩn';
+        hideButton.style.marginTop = '10px';
+        hideButton.style.padding = '6px 10px';
+        hideButton.style.border = 'none';
+        hideButton.style.borderRadius = '5px';
+        hideButton.style.background = '#ff4444';
+        hideButton.style.color = 'white';
+        hideButton.style.cursor = 'pointer';
+        hideButton.style.fontSize = '14px';
+
+        hideButton.addEventListener('click', function() {
+            container.style.display = 'none';
+            showButton.style.display = 'block';
+            localStorage.setItem('lms360_ui_hidden', 'true');
+        });
+
+        let showButton = document.createElement('button');
+        showButton.innerText = '⚡ Hiện tốc độ';
+        showButton.style.position = 'fixed';
+        showButton.style.top = '15px';
+        showButton.style.right = '15px';
+        showButton.style.background = '#28a745';
+        showButton.style.color = 'white';
+        showButton.style.border = 'none';
+        showButton.style.padding = '8px 12px';
+        showButton.style.borderRadius = '8px';
+        showButton.style.cursor = 'pointer';
+        showButton.style.fontSize = '14px';
+        showButton.style.display = 'none';
+        showButton.style.zIndex = '100001';
+
+        showButton.addEventListener('click', function() {
+            container.style.display = 'flex';
+            showButton.style.display = 'none';
+            localStorage.setItem('lms360_ui_hidden', 'false');
+        });
+
+        container.appendChild(title);
+        container.appendChild(speedLabel);
+        container.appendChild(slider);
+        container.appendChild(buttonContainer);
+        container.appendChild(hideButton);
+        document.body.appendChild(container);
+        document.body.appendChild(showButton);
+
+        if (localStorage.getItem('lms360_ui_hidden') === 'true') {
+            container.style.display = 'none';
+            showButton.style.display = 'block';
+        }
+    }
+
+    function applySavedSpeed(video) {
+        let savedSpeed = localStorage.getItem('lms360_video_speed');
+        if (savedSpeed) {
+            video.playbackRate = parseFloat(savedSpeed);
+        }
+    }
+
+    function init() {
+        let video = getVideoElement();
+        if (!video) return;
+
+        applySavedSpeed(video);
+        createUI(video);
+    }
+
+    setInterval(init, 2000);
+})();
