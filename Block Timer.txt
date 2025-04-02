@@ -1,0 +1,111 @@
+// ==UserScript==
+// @name         VIP PRO MAX V3 - Chặn Bộ Đếm Thời Gian (Chỉ LMS360)
+// @namespace    http://tampermonkey.net/
+// @version      3.2
+// @description  Chặn bộ đếm thời gian + Giao diện VIP PRO MAX (Chỉ chạy trên lms360.edu.vn)
+// @author       Bạn
+// @match        *://lms360.edu.vn/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    let isEnabled = localStorage.getItem("vip_pro_max_status") === "true";
+
+    function blockTimers() {
+        if (!isEnabled) return;
+
+        console.log("[UserScript] Đã chặn bộ đếm thời gian trên LMS360!");
+
+        window.setInterval = function() { return 0; };
+        window.setTimeout = function() { return 0; };
+
+        for (let i = 1; i < 99999; i++) {
+            clearInterval(i);
+            clearTimeout(i);
+        }
+
+        document.addEventListener("visibilitychange", function(event) {
+            event.stopImmediatePropagation();
+        }, true);
+
+        window.onbeforeunload = null;
+        window.onunload = null;
+
+        window.addEventListener("beforeunload", function(event) {
+            event.stopImmediatePropagation();
+        }, true);
+
+        performance.now = function() { return 0; };
+    }
+
+    if (isEnabled) blockTimers();
+
+    let div = document.createElement("div");
+    div.id = "script-ui";
+    div.style = `
+        position: fixed;
+        top: 20px;
+        left: 20px;
+        width: 250px;
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 15px;
+        font-size: 14px;
+        border-radius: 8px;
+        z-index: 9999;
+        box-shadow: 0px 0px 15px rgba(255, 255, 255, 0.2);
+        font-family: Arial, sans-serif;
+        cursor: grab;
+    `;
+    div.innerHTML = `
+        <b>🚀 VIP PRO MAX - LMS360</b> <br>
+        ✅ Trạng thái: <span id="status">${isEnabled ? "Đang bật" : "Đã tắt"}</span> <br>
+        <button id="toggle-script" style="
+            margin-top: 10px;
+            width: 100%;
+            background: ${isEnabled ? "red" : "green"};
+            color: white;
+            border: none;
+            padding: 8px;
+            cursor: pointer;
+            border-radius: 5px;
+        ">${isEnabled ? "Tắt Script" : "Bật Script"}</button>
+    `;
+    document.body.appendChild(div);
+
+    document.getElementById("toggle-script").addEventListener("click", function() {
+        isEnabled = !isEnabled;
+        localStorage.setItem("vip_pro_max_status", isEnabled);
+        document.getElementById("status").innerText = isEnabled ? "Đang bật" : "Đã tắt";
+        this.innerText = isEnabled ? "Tắt Script" : "Bật Script";
+        this.style.background = isEnabled ? "red" : "green";
+
+        if (isEnabled) {
+            blockTimers();
+        } else {
+            location.reload();
+        }
+    });
+
+    let offsetX, offsetY, isDragging = false;
+
+    div.addEventListener("mousedown", function(e) {
+        isDragging = true;
+        offsetX = e.clientX - div.getBoundingClientRect().left;
+        offsetY = e.clientY - div.getBoundingClientRect().top;
+        div.style.cursor = "grabbing";
+    });
+
+    document.addEventListener("mousemove", function(e) {
+        if (!isDragging) return;
+        div.style.left = `${e.clientX - offsetX}px`;
+        div.style.top = `${e.clientY - offsetY}px`;
+    });
+
+    document.addEventListener("mouseup", function() {
+        isDragging = false;
+        div.style.cursor = "grab";
+    });
+})();
