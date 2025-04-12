@@ -1,14 +1,14 @@
 // ==UserScript==
-// @name         VIP PRO MAX V3 - Chặn Bộ Đếm Thời Gian (Chỉ LMS360)
+// @name         LMS360 - Chặn Thời Gian UI Pro
 // @namespace    http://tampermonkey.net/
-// @version      3.2
-// @description  Chặn bộ đếm thời gian + Giao diện VIP PRO MAX (Chỉ chạy trên lms360.edu.vn)
+// @version      2.1
+// @description  Giao diện hiện đại + Chặn bộ đếm + Kéo thả + Hover đẹp + Đồng hồ làm bài xịn xò 😎
 // @author       Bạn
 // @match        *://lms360.edu.vn/*
 // @grant        none
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
     let isEnabled = localStorage.getItem("vip_pro_max_status") === "true";
@@ -16,96 +16,242 @@
     function blockTimers() {
         if (!isEnabled) return;
 
-        console.log("[UserScript] Đã chặn bộ đếm thời gian trên LMS360!");
+        console.log("[Script] Đã chặn bộ đếm thời gian!");
 
-        window.setInterval = function() { return 0; };
-        window.setTimeout = function() { return 0; };
+        window.setInterval = () => 0;
+        window.setTimeout = () => 0;
 
         for (let i = 1; i < 99999; i++) {
             clearInterval(i);
             clearTimeout(i);
         }
 
-        document.addEventListener("visibilitychange", function(event) {
-            event.stopImmediatePropagation();
-        }, true);
-
+        document.addEventListener("visibilitychange", e => e.stopImmediatePropagation(), true);
         window.onbeforeunload = null;
         window.onunload = null;
 
-        window.addEventListener("beforeunload", function(event) {
-            event.stopImmediatePropagation();
-        }, true);
-
-        performance.now = function() { return 0; };
+        window.addEventListener("beforeunload", e => e.stopImmediatePropagation(), true);
+        performance.now = () => 0;
     }
 
-    if (isEnabled) blockTimers();
+    // ============ Timer ============
+    let timerInterval;
+    let seconds = 0;
 
-    let div = document.createElement("div");
-    div.id = "script-ui";
-    div.style = `
-        position: fixed;
-        top: 20px;
-        left: 20px;
-        width: 250px;
-        background: rgba(0, 0, 0, 0.9);
-        color: white;
-        padding: 15px;
-        font-size: 14px;
-        border-radius: 8px;
-        z-index: 9999;
-        box-shadow: 0px 0px 15px rgba(255, 255, 255, 0.2);
-        font-family: Arial, sans-serif;
-        cursor: grab;
-    `;
-    div.innerHTML = `
-        <b>🚀 VIP PRO MAX - LMS360</b> <br>
-        ✅ Trạng thái: <span id="status">${isEnabled ? "Đang bật" : "Đã tắt"}</span> <br>
-        <button id="toggle-script" style="
+    function startTimer() {
+        const display = document.getElementById("timer-display");
+        clearInterval(timerInterval);
+        seconds = 0;
+        display.textContent = "00:00:00";
+
+        timerInterval = setInterval(() => {
+            seconds++;
+            let hrs = String(Math.floor(seconds / 3600)).padStart(2, '0');
+            let mins = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+            let secs = String(seconds % 60).padStart(2, '0');
+            display.textContent = `${hrs}:${mins}:${secs}`;
+        }, 1000);
+    }
+
+    // ============ UI =============
+    const uiBox = document.createElement("div");
+    uiBox.id = "lms-ui-pro";
+    uiBox.innerHTML = `
+        <div class="lms-box">
+            <div class="header" id="drag-handle">
+                <div class="logo">
+                    <svg width="20" height="20" fill="#00FFC8" viewBox="0 0 24 24"><path d="M5 3a2 2 0 0 0-2 2v2h18V5a2 2 0 0 0-2-2H5zM3 9v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9H3zm8 3h2v5h-2v-5z"/></svg>
+                    <span>Chặn thời gian</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-script" ${isEnabled ? "checked" : ""}>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="status">
+                <strong>Trạng thái:</strong> <span id="status">${isEnabled ? "Đang bật" : "Đã tắt"}</span>
+            </div>
+            <div class="timer">
+                <svg width="16" height="16" fill="#00FFC8" viewBox="0 0 24 24"><path d="M12 8v5l4.28 2.54.72-1.21-3.5-2.08V8z"/><path d="M12 1C5.93 1 1 5.93 1 12s4.93 11 11 11 11-4.93 11-11S18.07 1 12 1zm0 20c-4.97 0-9-4.03-9-9s4.03-9 9-9 9 4.03 9 9-4.03 9-9 9z"/></svg>
+                <span id="timer-display">00:00:00</span>
+            </div>
+        </div>
+
+        <style>
+        #lms-ui-pro {
+            position: fixed;
+            top: 30px;
+            left: 30px;
+            z-index: 99999;
+        }
+.lms-box {
+    background: #1f1f1f;
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 12px 25px rgba(0, 255, 200, 0.2);
+    font-family: 'Segoe UI', sans-serif;
+    color: #eee;
+    width: 280px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    user-select: none; /* 👈 Thêm dòng này để ngăn bôi đen */
+}
+
+        .lms-box:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 14px 28px rgba(0, 255, 200, 0.3);
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: bold;
+            color: #00FFC8;
+            font-size: 16px;
+        }
+        .status, .timer {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             margin-top: 10px;
-            width: 100%;
-            background: ${isEnabled ? "red" : "green"};
-            color: white;
-            border: none;
-            padding: 8px;
-            cursor: pointer;
-            border-radius: 5px;
-        ">${isEnabled ? "Tắt Script" : "Bật Script"}</button>
-    `;
-    document.body.appendChild(div);
+            font-size: 15px;
+        }
+        #timer-display {
+            font-weight: bold;
+            color: #00FFC8;
+            font-size: 17px;
+        }
 
-    document.getElementById("toggle-script").addEventListener("click", function() {
-        isEnabled = !isEnabled;
+/* Switch Container */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 52px;
+    height: 28px;
+}
+
+/* Ẩn checkbox gốc */
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+/* Thanh trượt */
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #555;
+    transition: 0.4s;
+    border-radius: 34px;
+    box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.3);
+}
+
+/* Nút tròn bên trong */
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 22px;
+    width: 22px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.4s;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Trạng thái bật */
+input:checked + .slider {
+    background-color: #00FFC8;
+    box-shadow: 0 0 8px rgba(0, 255, 200, 0.6);
+}
+
+input:checked + .slider:before {
+    transform: translateX(24px);
+    background-color: #fff;
+}
+
+/* Hover khi rê chuột vào switch */
+.switch:hover .slider {
+    background-color: #00e6b2;
+box-shadow: 0 0 5px rgba(0, 255, 200, 0.22);
+    transition: 0.3s ease;
+}
+
+@keyframes fadeSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+#lms-ui-pro {
+    animation: fadeSlideIn 0.4s ease-out;
+}
+
+
+        </style>
+    `;
+
+    document.body.appendChild(uiBox);
+
+    const timerDiv = document.querySelector("#lms-ui-pro .timer");
+if (timerDiv) {
+    timerDiv.style.opacity = "0";
+    timerDiv.style.transition = "opacity 0.5s ease, transform 0.5s ease";
+    timerDiv.style.transform = "translateY(20px)";
+    requestAnimationFrame(() => {
+        timerDiv.style.opacity = "1";
+        timerDiv.style.transform = "translateY(0)";
+    });
+}
+
+
+    // ============ Events ============
+    if (isEnabled) blockTimers();
+    startTimer();
+
+    document.getElementById("toggle-script").addEventListener("change", function () {
+        isEnabled = this.checked;
         localStorage.setItem("vip_pro_max_status", isEnabled);
         document.getElementById("status").innerText = isEnabled ? "Đang bật" : "Đã tắt";
-        this.innerText = isEnabled ? "Tắt Script" : "Bật Script";
-        this.style.background = isEnabled ? "red" : "green";
-
-        if (isEnabled) {
-            blockTimers();
-        } else {
-            location.reload();
-        }
+        if (isEnabled) blockTimers(); else location.reload();
     });
 
-    let offsetX, offsetY, isDragging = false;
+    // ============ Drag Support ============
+    const dragHandle = document.getElementById("lms-ui-pro");
+    const container = document.getElementById("lms-ui-pro");
+    let offsetX = 0, offsetY = 0, dragging = false;
 
-    div.addEventListener("mousedown", function(e) {
-        isDragging = true;
-        offsetX = e.clientX - div.getBoundingClientRect().left;
-        offsetY = e.clientY - div.getBoundingClientRect().top;
-        div.style.cursor = "grabbing";
+    dragHandle.addEventListener("mousedown", (e) => {
+        dragging = true;
+        offsetX = e.clientX - container.getBoundingClientRect().left;
+        offsetY = e.clientY - container.getBoundingClientRect().top;
+        document.body.style.userSelect = "none";
     });
 
-    document.addEventListener("mousemove", function(e) {
-        if (!isDragging) return;
-        div.style.left = `${e.clientX - offsetX}px`;
-        div.style.top = `${e.clientY - offsetY}px`;
+    document.addEventListener("mousemove", (e) => {
+        if (!dragging) return;
+        container.style.left = `${e.clientX - offsetX}px`;
+        container.style.top = `${e.clientY - offsetY}px`;
     });
 
-    document.addEventListener("mouseup", function() {
-        isDragging = false;
-        div.style.cursor = "grab";
+    document.addEventListener("mouseup", () => {
+        dragging = false;
+        document.body.style.userSelect = "";
     });
+
 })();
