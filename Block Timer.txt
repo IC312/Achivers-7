@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LMS360 - Chặn Thời Gian UI Pro
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      1.0
 // @description  Giao diện hiện đại + Chặn bộ đếm + Kéo thả + Hover đẹp + Đồng hồ làm bài xịn xò 😎
 // @author       Bạn
 // @match        *://lms360.edu.vn/*
@@ -77,133 +77,132 @@
             </div>
         </div>
 
-        <style>
-        #lms-ui-pro {
-            position: fixed;
-            top: 30px;
-            left: 30px;
-            z-index: 99999;
-        }
-.lms-box {
-    background: #1f1f1f;
-    border-radius: 14px;
-    padding: 16px;
-    box-shadow: 0 12px 25px rgba(0, 255, 200, 0.2);
-    font-family: 'Segoe UI', sans-serif;
-    color: #eee;
-    width: 280px;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-    user-select: none; /* 👈 Thêm dòng này để ngăn bôi đen */
-}
+<style>
+    #lms-ui-pro {
+        position: fixed;
+        top: 30px;
+        left: 30px;
+        z-index: 99999;
+        animation: fadeSlideIn 0.4s ease-out;
+    }
 
-        .lms-box:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 14px 28px rgba(0, 255, 200, 0.3);
-        }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-weight: bold;
-            color: #00FFC8;
-            font-size: 16px;
-        }
-        .status, .timer {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 10px;
-            font-size: 15px;
-        }
-        #timer-display {
-            font-weight: bold;
-            color: #00FFC8;
-            font-size: 17px;
-        }
+    .lms-box {
+        background: #1f1f1f;
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 0 12px 25px rgba(0, 255, 200, 0.2);
+        font-family: 'Segoe UI', sans-serif;
+        color: #eee;
+        width: 280px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        user-select: none;
+    }
 
-/* Switch Container */
-.switch {
-    position: relative;
-    display: inline-block;
-    width: 52px;
-    height: 28px;
-}
+    .lms-box:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 14px 28px rgba(0, 255, 200, 0.3);
+    }
 
-/* Ẩn checkbox gốc */
-.switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
+    .lms-box.pressed {
+        transform: scale(0.90);
+    }
 
-/* Thanh trượt */
-.slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: #555;
-    transition: 0.4s;
-    border-radius: 34px;
-    box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.3);
-}
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
 
-/* Nút tròn bên trong */
-.slider:before {
-    position: absolute;
-    content: "";
-    height: 22px;
-    width: 22px;
-    left: 3px;
-    bottom: 3px;
-    background-color: white;
-    transition: 0.4s;
-    border-radius: 50%;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
+    .logo {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: bold;
+        color: #00FFC8;
+        font-size: 16px;
+    }
 
-/* Trạng thái bật */
-input:checked + .slider {
-    background-color: #00FFC8;
-    box-shadow: 0 0 8px rgba(0, 255, 200, 0.6);
-}
+    .status, .timer {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        font-size: 15px;
+    }
 
-input:checked + .slider:before {
-    transform: translateX(24px);
-    background-color: #fff;
-}
+    #timer-display {
+        font-weight: bold;
+        color: #00FFC8;
+        font-size: 17px;
+    }
 
-/* Hover khi rê chuột vào switch */
-.switch:hover .slider {
-    background-color: #00e6b2;
-box-shadow: 0 0 5px rgba(0, 255, 200, 0.22);
-    transition: 0.3s ease;
-}
+    .switch {
+        position: relative;
+        display: inline-block;
+        width: 52px;
+        height: 28px;
+    }
 
-@keyframes fadeSlideIn {
-    from {
+    .switch input {
         opacity: 0;
-        transform: translateY(20px);
+        width: 0;
+        height: 0;
     }
-    to {
-        opacity: 1;
-        transform: translateY(0);
+
+    .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #555;
+        transition: 0.4s;
+        border-radius: 34px;
+        box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.3);
     }
-}
 
-#lms-ui-pro {
-    animation: fadeSlideIn 0.4s ease-out;
-}
+    .slider:before {
+        position: absolute;
+        content: "";
+        height: 22px;
+        width: 22px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: 0.4s;
+        border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
 
+    input:checked + .slider {
+        background-color: #00FFC8;
+        box-shadow: 0 0 8px rgba(0, 255, 200, 0.6);
+    }
 
-        </style>
+    input:checked + .slider:before {
+        transform: translateX(24px);
+        background-color: #fff;
+    }
+
+    .switch:hover .slider {
+        background-color: #00e6b2;
+        box-shadow: 0 0 5px rgba(0, 255, 200, 0.22);
+        transition: 0.3s ease;
+    }
+
+    @keyframes fadeSlideIn {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+</style>
+
     `;
 
     document.body.appendChild(uiBox);
@@ -253,5 +252,25 @@ if (timerDiv) {
         dragging = false;
         document.body.style.userSelect = "";
     });
+
+const lmsBox = document.querySelector("#lms-ui-pro .lms-box");
+let isMouseDown = false;
+
+lmsBox.addEventListener("mousedown", (e) => {
+    // Nếu nhấn vào switch hoặc thành phần con của switch, thì bỏ qua hiệu ứng
+    if (e.target.closest('.switch')) return;
+    isMouseDown = true;
+    lmsBox.classList.add("pressed");
+});
+
+
+document.addEventListener("mouseup", () => {
+    if (isMouseDown) {
+        lmsBox.classList.remove("pressed");
+        isMouseDown = false;
+    }
+});
+
+
 
 })();
