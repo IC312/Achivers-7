@@ -2,8 +2,8 @@
 // @name         LMS360 - Chặn Thời Gian UI Pro
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  Giao diện hiện đại + Chặn bộ đếm + Kéo thả + Hover đẹp + Đồng hồ làm bài xịn xò 😎
-// @author       Bạn
+// @description  Giao diện hiện đại + Chặn bộ đếm + Kéo thả + Responsive + Hover đẹp 😎
+// @author       Vo Quan
 // @match        *://lms360.edu.vn/*
 // @grant        none
 // ==/UserScript==
@@ -35,6 +35,7 @@
     }
 
     // ============ Timer ============
+
     let timerInterval;
     let seconds = 0;
 
@@ -54,6 +55,7 @@
     }
 
     // ============ UI =============
+
     const uiBox = document.createElement("div");
     uiBox.id = "lms-ui-pro";
     uiBox.innerHTML = `
@@ -77,149 +79,183 @@
             </div>
         </div>
 
-<style>
+        <style>
+#lms-ui-pro {
+    position: fixed;
+    top: 30px;
+    left: 30px;
+    z-index: 99999;
+    animation: fadeSlideIn 0.4s ease-out;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    will-change: transform;
+    max-width: 100vw;
+    box-sizing: border-box;
+}
+
+.lms-box {
+    background: #1f1f1f;
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 12px 25px rgba(0, 255, 200, 0.2);
+    font-family: 'Segoe UI', sans-serif;
+    color: #eee;
+    width: 280px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    user-select: none;
+    box-sizing: border-box;
+}
+
+.lms-box:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 14px 28px rgba(0, 255, 200, 0.3);
+}
+
+.lms-box.pressed {
+    transform: scale(0.97);
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: bold;
+    color: #00FFC8;
+    font-size: 16px;
+}
+
+.status,
+.timer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 15px;
+}
+
+#timer-display {
+    font-weight: bold;
+    color: #00FFC8;
+    font-size: 17px;
+}
+
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 52px;
+    height: 28px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #555;
+    transition: 0.4s;
+    border-radius: 34px;
+    box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.3);
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 22px;
+    width: 22px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.4s;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+input:checked + .slider {
+    background-color: #00FFC8;
+    box-shadow: 0 0 8px rgba(0, 255, 200, 0.6);
+}
+
+input:checked + .slider:before {
+    transform: translateX(24px);
+    background-color: #fff;
+}
+
+.switch:hover .slider {
+    background-color: #00e6b2;
+    box-shadow: 0 0 5px rgba(0, 255, 200, 0.22);
+    transition: 0.3s ease;
+}
+
+@keyframes fadeSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 📱 Responsive cho mobile portrait */
+@media (max-width: 480px) {
     #lms-ui-pro {
-        position: fixed;
-        top: 30px;
-        left: 30px;
-        z-index: 99999;
-        animation: fadeSlideIn 0.4s ease-out;
+        top: 10px !important;
+        left: 10px !important;
+        max-width: 90vw;
     }
 
     .lms-box {
-        background: #1f1f1f;
-        border-radius: 14px;
-        padding: 16px;
-        box-shadow: 0 12px 25px rgba(0, 255, 200, 0.2);
-        font-family: 'Segoe UI', sans-serif;
-        color: #eee;
-        width: 280px;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-        user-select: none;
-    }
-
-    .lms-box:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 14px 28px rgba(0, 255, 200, 0.3);
-    }
-
-    .lms-box.pressed {
-        transform: scale(0.90);
-    }
-
-    .header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .logo {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-weight: bold;
-        color: #00FFC8;
-        font-size: 16px;
-    }
-
-    .status, .timer {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 10px;
-        font-size: 15px;
+        width: 260px !important;
+        font-size: 13px;
+        padding: 12px;
     }
 
     #timer-display {
-        font-weight: bold;
-        color: #00FFC8;
-        font-size: 17px;
+        font-size: 15px;
     }
 
     .switch {
-        position: relative;
-        display: inline-block;
-        width: 52px;
-        height: 28px;
+        transform: scale(0.85);
     }
 
-    .switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
+    .logo svg {
+        width: 16px;
+        height: 16px;
     }
+}
 
-    .slider {
-        position: absolute;
-        cursor: pointer;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: #555;
-        transition: 0.4s;
-        border-radius: 34px;
-        box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.3);
-    }
-
-    .slider:before {
-        position: absolute;
-        content: "";
-        height: 22px;
-        width: 22px;
-        left: 3px;
-        bottom: 3px;
-        background-color: white;
-        transition: 0.4s;
-        border-radius: 50%;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    }
-
-    input:checked + .slider {
-        background-color: #00FFC8;
-        box-shadow: 0 0 8px rgba(0, 255, 200, 0.6);
-    }
-
-    input:checked + .slider:before {
-        transform: translateX(24px);
-        background-color: #fff;
-    }
-
-    .switch:hover .slider {
-        background-color: #00e6b2;
-        box-shadow: 0 0 5px rgba(0, 255, 200, 0.22);
-        transition: 0.3s ease;
-    }
-
-    @keyframes fadeSlideIn {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-</style>
-
+        </style>
     `;
 
     document.body.appendChild(uiBox);
 
     const timerDiv = document.querySelector("#lms-ui-pro .timer");
-if (timerDiv) {
-    timerDiv.style.opacity = "0";
-    timerDiv.style.transition = "opacity 0.5s ease, transform 0.5s ease";
-    timerDiv.style.transform = "translateY(20px)";
-    requestAnimationFrame(() => {
-        timerDiv.style.opacity = "1";
-        timerDiv.style.transform = "translateY(0)";
-    });
-}
+    if (timerDiv) {
+        timerDiv.style.opacity = "0";
+        timerDiv.style.transition = "opacity 0.5s ease, transform 0.5s ease";
+        timerDiv.style.transform = "translateY(20px)";
+        requestAnimationFrame(() => {
+            timerDiv.style.opacity = "1";
+            timerDiv.style.transform = "translateY(0)";
+        });
+    }
 
-
-    // ============ Events ============
     if (isEnabled) blockTimers();
     startTimer();
 
@@ -230,47 +266,94 @@ if (timerDiv) {
         if (isEnabled) blockTimers(); else location.reload();
     });
 
-    // ============ Drag Support ============
-    const dragHandle = document.getElementById("lms-ui-pro");
-    const container = document.getElementById("lms-ui-pro");
-    let offsetX = 0, offsetY = 0, dragging = false;
-
-    dragHandle.addEventListener("mousedown", (e) => {
-        dragging = true;
-        offsetX = e.clientX - container.getBoundingClientRect().left;
-        offsetY = e.clientY - container.getBoundingClientRect().top;
-        document.body.style.userSelect = "none";
-    });
-
-    document.addEventListener("mousemove", (e) => {
-        if (!dragging) return;
-        container.style.left = `${e.clientX - offsetX}px`;
-        container.style.top = `${e.clientY - offsetY}px`;
-    });
-
-    document.addEventListener("mouseup", () => {
-        dragging = false;
-        document.body.style.userSelect = "";
-    });
+    // ============ Drag & Interaction ============
 
 const lmsBox = document.querySelector("#lms-ui-pro .lms-box");
-let isMouseDown = false;
+const dragTarget = document.querySelector("#lms-ui-pro");
 
-lmsBox.addEventListener("mousedown", (e) => {
-    // Nếu nhấn vào switch hoặc thành phần con của switch, thì bỏ qua hiệu ứng
+let isMouseDown = false;
+let dragging = false;
+let offsetX = 0, offsetY = 0;
+let touchMoved = false;
+
+function handlePressStart(e) {
     if (e.target.closest('.switch')) return;
     isMouseDown = true;
     lmsBox.classList.add("pressed");
-});
+}
 
-
-document.addEventListener("mouseup", () => {
+function handlePressEnd() {
     if (isMouseDown) {
         lmsBox.classList.remove("pressed");
         isMouseDown = false;
     }
+}
+
+function startDrag(x, y) {
+    dragging = true;
+    const rect = dragTarget.getBoundingClientRect();
+    offsetX = x - rect.left;
+    offsetY = y - rect.top;
+    document.body.style.userSelect = "none";
+}
+
+function duringDrag(x, y) {
+    if (!dragging) return;
+    dragTarget.style.left = `${x - offsetX}px`;
+    dragTarget.style.top = `${y - offsetY}px`;
+}
+
+function stopDrag() {
+    dragging = false;
+    document.body.style.userSelect = "";
+}
+
+// PC
+dragTarget.addEventListener("mousedown", (e) => {
+    if (e.target.closest('.switch')) return;
+    handlePressStart(e);
+    startDrag(e.clientX, e.clientY);
 });
+document.addEventListener("mouseup", () => {
+    handlePressEnd();
+    stopDrag();
+});
+document.addEventListener("mousemove", (e) => duringDrag(e.clientX, e.clientY));
 
+// Mobile
+dragTarget.addEventListener("touchstart", (e) => {
+    if (e.target.closest('.switch')) return;
+    handlePressStart(e);
+    const touch = e.touches[0];
+    startDrag(touch.clientX, touch.clientY);
+    touchMoved = false;
+}, { passive: false });
 
+dragTarget.addEventListener("touchmove", (e) => {
+    const touch = e.touches[0];
+    duringDrag(touch.clientX, touch.clientY);
+    touchMoved = true;
+    e.preventDefault();
+}, { passive: false });
+
+dragTarget.addEventListener("touchend", () => {
+    stopDrag();
+    if (touchMoved) handlePressEnd();
+    else setTimeout(() => handlePressEnd(), 100);
+}, { passive: false });
+
+// Ngăn tương tác nền
+dragTarget.addEventListener("touchstart", (e) => {
+    if (!e.target.closest('.switch')) e.stopPropagation();
+}, { passive: false });
+
+dragTarget.addEventListener("touchend", (e) => {
+    e.stopPropagation();
+}, { passive: false });
+
+dragTarget.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+}, { passive: false });
 
 })();
