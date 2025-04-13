@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.0
 // @description  Giao diện hiện đại + Chặn bộ đếm + Kéo thả + Responsive + Hover đẹp 😎
-// @author       Vo Quan
+// @author       Bạn
 // @match        *://lms360.edu.vn/*
 // @grant        none
 // ==/UserScript==
@@ -85,7 +85,7 @@
     top: 30px;
     left: 30px;
     z-index: 99999;
-    animation: fadeSlideIn 0.4s ease-out;
+    animation: fadeSlideIn 0.5s ease-out;
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
@@ -102,7 +102,7 @@
     font-family: 'Segoe UI', sans-serif;
     color: #eee;
     width: 280px;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition: transform 0.4s ease, box-shadow 0.4s ease;
     user-select: none;
     box-sizing: border-box;
 }
@@ -113,7 +113,7 @@
 }
 
 .lms-box.pressed {
-    transform: scale(0.97);
+    transform: scale(0.80);
 }
 
 .header {
@@ -212,6 +212,7 @@ input:checked + .slider:before {
     }
 }
 
+
 /* 📱 Responsive cho mobile portrait */
 @media (max-width: 480px) {
     #lms-ui-pro {
@@ -248,7 +249,7 @@ input:checked + .slider:before {
     const timerDiv = document.querySelector("#lms-ui-pro .timer");
     if (timerDiv) {
         timerDiv.style.opacity = "0";
-        timerDiv.style.transition = "opacity 0.5s ease, transform 0.5s ease";
+        timerDiv.style.transition = "opacity 0.8s ease, transform 0.8s ease";
         timerDiv.style.transform = "translateY(20px)";
         requestAnimationFrame(() => {
             timerDiv.style.opacity = "1";
@@ -266,15 +267,27 @@ input:checked + .slider:before {
         if (isEnabled) blockTimers(); else location.reload();
     });
 
-    // ============ Drag & Interaction ============
-
+// ============ Drag & Interaction (PC + Mobile + mượt hơn) ============
 const lmsBox = document.querySelector("#lms-ui-pro .lms-box");
 const dragTarget = document.querySelector("#lms-ui-pro");
+const dragHandle = document.querySelector("#lms-ui-pro"); // Toàn bộ khung kéo được
 
 let isMouseDown = false;
 let dragging = false;
 let offsetX = 0, offsetY = 0;
 let touchMoved = false;
+
+// Tạo lớp chặn iframe
+const iframeBlocker = document.createElement("div");
+iframeBlocker.style.position = "fixed";
+iframeBlocker.style.top = "0";
+iframeBlocker.style.left = "0";
+iframeBlocker.style.width = "100vw";
+iframeBlocker.style.height = "100vh";
+iframeBlocker.style.zIndex = "99998";
+iframeBlocker.style.display = "none";
+iframeBlocker.style.cursor = "grabbing";
+document.body.appendChild(iframeBlocker);
 
 function handlePressStart(e) {
     if (e.target.closest('.switch')) return;
@@ -291,6 +304,7 @@ function handlePressEnd() {
 
 function startDrag(x, y) {
     dragging = true;
+    iframeBlocker.style.display = "block"; // Chặn iframe
     const rect = dragTarget.getBoundingClientRect();
     offsetX = x - rect.left;
     offsetY = y - rect.top;
@@ -305,23 +319,28 @@ function duringDrag(x, y) {
 
 function stopDrag() {
     dragging = false;
+    iframeBlocker.style.display = "none"; // Gỡ chặn iframe
     document.body.style.userSelect = "";
 }
 
-// PC
-dragTarget.addEventListener("mousedown", (e) => {
+// PC events
+dragHandle.addEventListener("mousedown", (e) => {
     if (e.target.closest('.switch')) return;
     handlePressStart(e);
     startDrag(e.clientX, e.clientY);
 });
-document.addEventListener("mouseup", () => {
+
+window.addEventListener("mouseup", () => {
     handlePressEnd();
     stopDrag();
 });
-document.addEventListener("mousemove", (e) => duringDrag(e.clientX, e.clientY));
 
-// Mobile
-dragTarget.addEventListener("touchstart", (e) => {
+window.addEventListener("mousemove", (e) => {
+    if (dragging) duringDrag(e.clientX, e.clientY);
+});
+
+// Mobile touch events
+dragHandle.addEventListener("touchstart", (e) => {
     if (e.target.closest('.switch')) return;
     handlePressStart(e);
     const touch = e.touches[0];
@@ -329,20 +348,20 @@ dragTarget.addEventListener("touchstart", (e) => {
     touchMoved = false;
 }, { passive: false });
 
-dragTarget.addEventListener("touchmove", (e) => {
+dragHandle.addEventListener("touchmove", (e) => {
     const touch = e.touches[0];
     duringDrag(touch.clientX, touch.clientY);
     touchMoved = true;
     e.preventDefault();
 }, { passive: false });
 
-dragTarget.addEventListener("touchend", () => {
+dragHandle.addEventListener("touchend", () => {
     stopDrag();
     if (touchMoved) handlePressEnd();
     else setTimeout(() => handlePressEnd(), 100);
 }, { passive: false });
 
-// Ngăn tương tác nền
+// Ngăn chạm nền
 dragTarget.addEventListener("touchstart", (e) => {
     if (!e.target.closest('.switch')) e.stopPropagation();
 }, { passive: false });
