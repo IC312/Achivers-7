@@ -1,0 +1,75 @@
+// ==UserScript==
+// @name         Anti-Fullscreen & Monitoring Bypass
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Vô hiệu mọi cơ chế giám sát: F11, ESC, fullscreen, resize, visibility, DevTools lock, tab switch, blur, v.v.
+// @match        *://*/*
+// @run-at       document-start
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  // 🛑 Chặn F11 & ESC
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'F11' || e.keyCode === 122 || e.key === 'Escape' || e.keyCode === 27) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      console.warn(`⛔️ ${e.key} bị chặn bởi script`);
+    }
+  }, true);
+
+  // 🛡️ Chặn các sự kiện theo dõi hoạt động
+  ['visibilitychange', 'fullscreenchange', 'webkitfullscreenchange', 'blur', 'focus', 'resize', 'mouseout', 'mouseleave'].forEach(evt => {
+    window.addEventListener(evt, e => e.stopImmediatePropagation(), true);
+    document.addEventListener(evt, e => e.stopImmediatePropagation(), true);
+  });
+
+  // 🚫 Chặn ép fullscreen
+  document.documentElement.requestFullscreen = () => {
+    console.warn("🚫 requestFullscreen bị chặn");
+  };
+
+  // 🪄 Giả lập luôn ở fullscreen
+  Object.defineProperty(document, 'fullscreenElement', {
+    get: () => document.documentElement
+  });
+  Object.defineProperty(document, 'hidden', {
+    get: () => false
+  });
+  Object.defineProperty(document, 'visibilityState', {
+    get: () => 'visible'
+  });
+  document.hasFocus = () => true;
+
+  // ❌ Chặn IntersectionObserver (dò vùng hiển thị)
+  window.IntersectionObserver = class {
+    constructor() {
+      console.warn('[Bypass] Blocked IntersectionObserver');
+    }
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+  };
+
+  // ❌ Chặn requestAnimationFrame có chứa hasFocus
+  const originalRAF = window.requestAnimationFrame;
+  window.requestAnimationFrame = function (fn) {
+    if (typeof fn === 'function' && fn.toString().includes('hasFocus')) {
+      console.warn('[Bypass] Blocked requestAnimationFrame(hasFocus)');
+      return;
+    }
+    return originalRAF(fn);
+  };
+
+  // ❌ Chặn setInterval theo dõi focus
+  const originalSetInterval = window.setInterval;
+  window.setInterval = function (fn, delay, ...args) {
+    if (typeof fn === 'function' && fn.toString().includes('hasFocus')) {
+      console.warn('[Bypass] Blocked setInterval(hasFocus)');
+      return;
+    }
+    return originalSetInterval(fn, delay, ...args);
+  };
+
+})();
