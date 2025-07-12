@@ -4,12 +4,16 @@
 // @version      1.0
 // @description  Giao diện hiện đại + Chặn bộ đếm + Kéo thả + Responsive + Hover đẹp 😎
 // @author       Bạn
-// @match        *://lms360.edu.vn/*
+// @match        *://*/*
 // @grant        none
 // ==/UserScript==
 
 (function () {
     'use strict';
+
+        if (window.top !== window.self) {
+        return; // Dừng script nếu nó đang chạy trong iframe
+    }
 
     let isEnabled = localStorage.getItem("vip_pro_max_status") === "true";
 
