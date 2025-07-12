@@ -1,0 +1,326 @@
+// ==UserScript==
+// @name          Stupid Duck - Neo Glass UI (Draggable + Toggle + Enhanced Image Input)
+// @namespace     http://tampermonkey.net/
+// @version       1.0
+// @description   Giao diện kính mờ đẹp, kéo thả mượt, sửa lỗi iframe, thêm tùy chọn ảnh đầu vào và chỉnh cỡ chữ 🦆✨
+// @author        bạn
+// @match         *://*/*
+// @grant         GM_addStyle
+// @require       https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js
+// @connect       generativelanguage.googleapis.com
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    /* global html2canvas:true */ // Thêm dòng này để thông báo cho ESLint
+
+    // *** Fix: Chỉ chạy script trong top-level frame để tránh tạo nhiều giao diện trong iframe ***
+    if (window.top !== window.self) {
+        return;
+    }
+
+    const API_KEY = 'AIzaSyCsZIlNmH0qwFOTmLRcYpA0XNihFQsFaa0';
+    const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+
+    function delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function fetchWithRetry(url, options, retries = 3, delayMs = 5000) {
+        for (let i = 0; i < retries; i++) {
+            const response = await fetch(url, options);
+            if (response.status === 429) {
+                if (i === retries - 1) throw new Error('429 Too Many Requests');
+                await delay(delayMs);
+                continue;
+            }
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response;
+        }
+    }
+
+    async function sendToGemini(imageDataURL, description, resultContainer, loadingEl, errorEl) {
+        const mimeType = imageDataURL.match(/data:(image\/[^;]+);/)[1];
+        const base64Data = imageDataURL.split(',')[1];
+
+        const body = {
+            contents: [{
+                parts: [
+                    { text: `nói tiếng Việt và giúp tôi giải bài tập trong ảnh với mô tả: ${description}` },
+                    { inlineData: { mimeType, data: base64Data } }
+                ]
+            }]
+        };
+
+        try {
+            resultContainer.innerHTML = '';
+            loadingEl.style.display = 'block';
+            errorEl.textContent = '';
+
+            const response = await fetchWithRetry(`${API_URL}?key=${API_KEY}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
+            const data = await response.json();
+            const result = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+            if (!result) throw new Error("Không có phản hồi từ Gemini.");
+
+            resultContainer.innerHTML = result.replace(/\n/g, "<br>");
+        } catch (e) {
+            errorEl.textContent = "❌ " + e.message;
+        } finally {
+            loadingEl.style.display = 'none';
+        }
+    }
+
+    // ==== iframeBlocker để chặn iframe khi drag ====
+    const iframeBlocker = (() => {
+        const blocker = document.createElement("div");
+        blocker.style.position = "fixed";
+        blocker.style.top = "0";
+        blocker.style.left = "0";
+        blocker.style.width = "100vw";
+        blocker.style.height = "100vh";
+        blocker.style.zIndex = "999998";
+        blocker.style.cursor = "grabbing";
+        blocker.style.display = "none";
+        blocker.style.touchAction = "none";
+        document.body.appendChild(blocker);
+        return {
+show: () => { blocker.style.display = "block"; },
+hide: () => { blocker.style.display = "none"; }
+        };
+    })();
+
+    // Function to make element draggable (with iframe protection)
+    function makeDraggable(el) {
+        let isDown = false, offsetX, offsetY;
+
+        el.addEventListener('mousedown', function (e) {
+            if (e.target.id === 'stupid-duck-ui' || e.target.tagName === 'H2' || e.target.id === 'minimized-duck') {
+                isDown = true;
+                offsetX = e.clientX - el.offsetLeft;
+                offsetY = e.clientY - el.offsetTop;
+                el.style.transition = 'none';
+                iframeBlocker.show(); // 🛡 Hiện lớp chặn iframe
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('mousemove', function (e) {
+            if (!isDown) return;
+            el.style.left = `${e.clientX - offsetX}px`;
+            el.style.top = `${e.clientY - offsetY}px`;
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDown) {
+                isDown = false;
+                iframeBlocker.hide(); // 🛡 Ẩn lớp chặn iframe
+            }
+        });
+    }
+
+    function createNeoGlassUI() {
+        GM_addStyle(`
+            @keyframes zoomInFade {
+                0% { opacity: 0; transform: scale(0.8); }
+                100% { opacity: 1; transform: scale(1); }
+            }
+            @keyframes fadeIn {
+                from { opacity: 0; transform: scale(0.6); }
+                to { opacity: 1; transform: scale(1); }
+            }
+            #stupid-duck-ui, #minimized-duck {
+                animation: zoomInFade 0.5s ease forwards;
+            }
+
+            #stupid-duck-ui {
+                position: fixed;
+                top: 100px;
+                left: 100px;
+                width: 320px;
+                backdrop-filter: blur(15px);
+                background: rgba(18, 18, 18, 0.7);
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+                z-index: 999999;
+                padding: 20px;
+                font-family: 'Segoe UI', sans-serif;
+                color: #e0e0e0;
+                background-image: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(0,0,0,0));
+                transition: all 0.3s ease;
+            }
+
+            #stupid-duck-ui h2 {
+                margin: 0 0 10px;
+                font-size: 20px;
+                text-align: center;
+                color: #bbbbbb;
+                cursor: move;
+            }
+
+            #stupid-duck-ui textarea, #stupid-duck-ui button, #stupid-duck-ui #loading, #stupid-duck-ui #error, #stupid-duck-ui #result {
+                user-select: none;
+            }
+
+#stupid-duck-ui textarea {
+    width: 100%;
+    height: 60px;
+    resize: vertical;
+    padding: 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    font-size: 15px;
+    background: rgba(30, 30, 30, 0.8) !important; /* Thêm !important */
+    color: #ddd !important; /* Thêm !important */
+    outline: none;
+    box-shadow: inset 0 0 5px rgba(255, 255, 255, 0.1);
+    box-sizing: border-box; /* Giữ nguyên để khắc phục vấn đề khoảng cách */
+}
+            #stupid-duck-ui textarea:focus {
+                border-color: #4caf50;
+                box-shadow: 0 0 8px #4caf50;
+            }
+
+            #duck-minimize {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                width: 24px;
+                height: 24px;
+                background: #f44336;
+                border: none;
+                border-radius: 4px;
+                font-size: 16px;
+                color: white;
+                cursor: pointer;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                line-height: 1;
+                padding: 0;
+                box-shadow: 0 2px 4px rgba(244, 67, 54, 0.6);
+                transition: background 0.2s ease, transform 0.2s ease;
+                z-index: 10;
+            }
+
+            #duck-minimize:hover {
+                background: #e57373;
+                transform: scale(1.1);
+            }
+
+            #stupid-duck-ui button:not(#duck-minimize) {
+                width: 100%;
+                padding: 10px;
+                background: #4caf50;
+                border: none;
+                border-radius: 12px;
+                font-size: 15px;
+                color: white;
+                margin-top: 10px;
+                cursor: pointer;
+                box-shadow: 0 4px 8px rgba(76, 175, 80, 0.5);
+            }
+            #stupid-duck-ui button:not(#duck-minimize):hover {
+                background: #66bb6a;
+            }
+
+            #stupid-duck-ui #loading {
+                text-align: center;
+                margin-top: 10px;
+                font-size: 14px;
+                display: none;
+                color: #a5d6a7;
+            }
+            #stupid-duck-ui #error {
+                color: #ff6e6e;
+                font-size: 13px;
+                margin-top: 5px;
+                text-align: center;
+            }
+            #stupid-duck-ui #result {
+                margin-top: 10px;
+                max-height: 200px;
+                overflow-y: auto;
+                font-size: 15px;
+                background: rgba(40, 40, 40, 0.7);
+                border-radius: 10px;
+                padding: 10px;
+                color: #c8e6c9;
+            }
+
+            #minimized-duck {
+                position: fixed;
+                top: 100px;
+                left: 100px;
+                width: 50px;
+                height: 50px;
+                background: #2196f3;
+                border-radius: 50%;
+                box-shadow: 0 4px 12px rgba(33,150,243,0.6);
+                z-index: 999999;
+                display: none;
+                cursor: pointer;
+                animation: fadeIn 0.4s ease forwards;
+            }
+        `);
+
+        const ui = document.createElement('div');
+        ui.id = 'stupid-duck-ui';
+        ui.innerHTML = `
+            <h2>🐥 Giải Bài Tập 🐥</h2>
+            <textarea id="duck-desc" placeholder="Nhập mô tả bài tập (nếu cần)"></textarea>
+            <button id="duck-solve">📷 Chụp & Giải bài</button>
+            <button id="duck-minimize">x</button> <div id="loading">⏳ Đang xử lý...</div>
+            <div id="error"></div>
+            <div id="result"></div>
+        `;
+
+        const miniBtn = document.createElement('div');
+        miniBtn.id = 'minimized-duck';
+        miniBtn.title = "Hiện lại giao diện 🐥";
+
+        document.body.append(ui, miniBtn);
+        makeDraggable(ui);
+
+        const solveBtn = ui.querySelector('#duck-solve');
+        const minimizeBtn = ui.querySelector('#duck-minimize');
+        const desc = ui.querySelector('#duck-desc');
+        const result = ui.querySelector('#result');
+        const loading = ui.querySelector('#loading');
+        const error = ui.querySelector('#error');
+
+        solveBtn.addEventListener('click', () => {
+            result.innerHTML = '';
+            error.textContent = '';
+            loading.style.display = 'block';
+            html2canvas(document.body).then(canvas => {
+                const dataURL = canvas.toDataURL("image/png");
+                sendToGemini(dataURL, desc.value || "Không có mô tả", result, loading, error);
+            }).catch(err => {
+                loading.style.display = 'none';
+                error.textContent = "❌ Lỗi khi chụp màn hình: " + err.message;
+            });
+        });
+
+        minimizeBtn.addEventListener('click', () => {
+            ui.style.display = 'none';
+            miniBtn.style.display = 'block';
+        });
+
+        miniBtn.addEventListener('dblclick', () => {
+            ui.style.display = 'block';
+            miniBtn.style.display = 'none';
+        });
+
+        makeDraggable(miniBtn);
+    }
+
+    createNeoGlassUI();
+})();
