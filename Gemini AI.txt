@@ -20,7 +20,7 @@
         return;
     }
 
-    const API_KEY = 'AIzaSyCsZIlNmH0qwFOTmLRcYpA0XNihFQsFaa0';
+    const API_KEY = 'GEMINI_API_KEY';
     const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
     function delay(ms) {
