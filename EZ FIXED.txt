@@ -1,175 +1,14 @@
-
 // ==UserScript==
-// @name         EZ (PRE UPDATE VER) 14/12/24
+// @name         EZ
 // @namespace    http://tampermonkey.net/
-// @version      4.7
+// @version      1.0
 // @description  Dò đáp án đúng...
-// @author       V Quan Người đã test: H Nam, K Ngoc, ...
-// @match        https://lms360.edu.vn/*
+// @author       DÁDĐWWDA
+// @match        *://*/*
 // @grant        none
 // @downloadURL https://update.greasyfork.org/scripts/513239/EZ%20%28PRE%20UPDATE%20VER%29.user.js
 // @updateURL https://update.greasyfork.org/scripts/513239/EZ%20%28PRE%20UPDATE%20VER%29.meta.js
 // ==/UserScript==
-
-(async function() {
-  'use strict';
-
-  // URL meta.js chứa thông tin cập nhật
-  const updateURL = 'https://update.greasyfork.org/scripts/513239/D%C3%B2%20%C4%90%C3%A1p%20%C3%81n%20LMS%20360%20%28UPDATE%20VER%29.meta.js';
-  const currentVersion = '4.7'; // Phiên bản hiện tại của script
-
-  // Gọi hàm kiểm tra cập nhật ngay khi script được chạy
-  await checkForUpdates();
-
-  // Hàm kiểm tra cập nhật
-  async function checkForUpdates() {
-    let hasUpdate = false;
-
-    try {
-      const response = await fetch(updateURL, {
-        headers: { 'Content-Type': 'text/plain' }
-      });
-
-      if (!response.ok) throw new Error('Không thể tải thông tin cập nhật');
-
-      const data = await response.text();
-
-      // Phân tích metadata để tìm phiên bản mới
-      const versionMatch = data.match(/@version\s+([\d.]+)/);
-      if (versionMatch && versionMatch[1]) {
-        const latestVersion = versionMatch[1];
-
-        // So sánh phiên bản hiện tại với phiên bản mới
-        hasUpdate = compareVersions(currentVersion, latestVersion);
-
-        if (hasUpdate) {
-          showNotification(`<strong>Có bản cập nhật mới (v<strong>${latestVersion}</strong>)!</strong>`, 'success', true);
-        } else {
-          showNotification('<strong>Không có cập nhật mới</strong>', 'info', false);
-        }
-      }
-    } catch (error) {
-      console.error('Lỗi khi kiểm tra cập nhật:', error);
-      showNotification('<strong>Lỗi khi kiểm tra cập nhật</strong>', 'error', false);
-    }
-  }
-
-  // Hàm so sánh phiên bản
-  function compareVersions(current, latest) {
-    const currentParts = current.split('.').map(Number);
-    const latestParts = latest.split('.').map(Number);
-
-    for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
-      const curr = currentParts[i] || 0;
-      const latest = latestParts[i] || 0;
-      if (curr < latest) return true;
-      if (curr > latest) return false;
-    }
-    return false;
-  }
-
-  // Hàm hiển thị thông báo
-  function showNotification(message, type, showOkButton) {
-    const notificationBox = document.createElement('div');
-    notificationBox.className = 'notification';
-    notificationBox.style.position = 'fixed';
-    notificationBox.style.bottom = '70px';
-    notificationBox.style.left = '-300px';
-    notificationBox.style.padding = '10px';
-    notificationBox.style.backgroundColor = 'white';
-    notificationBox.style.border = '1px solid #ccc';
-    notificationBox.style.borderRadius = '5px';
-    notificationBox.style.display = 'flex';
-    notificationBox.style.alignItems = 'center';
-    notificationBox.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)';
-    notificationBox.style.zIndex = '9999';
-    notificationBox.style.transition = 'left 0.5s ease, opacity 0.5s ease';
-    notificationBox.style.opacity = '1';
-
-    const icon = document.createElement('div');
-    icon.className = 'icon';
-    const notificationText = document.createElement('div');
-    notificationText.className = 'text';
-    notificationText.innerHTML = message;
-
-    // Thay đổi biểu tượng và màu sắc dựa trên loại thông báo
-    if (type === 'success') {
-      icon.innerHTML = '<img src="https://img.icons8.com/ios-filled/50/28a745/checkmark.png" class="icon">';
-      notificationText.style.color = 'green';
-    } else if (type === 'error') {
-      icon.innerHTML = '<img src="https://img.icons8.com/ios-filled/50/FF0000/cancel.png" class="icon">';
-      notificationText.style.color = 'red';
-    } else if (type === 'info') {
-      icon.innerHTML = '<img src="https://cdn.iconscout.com/icon/free/png-512/free-info-icon-download-in-svg-png-gif-file-formats--information-data-user-interface-pack-icons-1604565.png?f=webp&w=256" width="30" height="30">';
-      notificationText.style.color = 'blue';
-    }
-
-    icon.style.marginRight = '10px';
-    notificationBox.appendChild(icon);
-    notificationBox.appendChild(notificationText);
-
-    // Tạo nút "Ok" chỉ khi có bản cập nhật mới
-    if (showOkButton) {
-      const okButton = document.createElement('button');
-      okButton.textContent = 'Ok';
-      okButton.style.marginLeft = '10px';
-      okButton.style.padding = '5px 10px';
-      okButton.style.border = 'none';
-      okButton.style.borderRadius = '5px';
-      okButton.style.backgroundColor = '#28a745';
-      okButton.style.color = 'white';
-      okButton.style.cursor = 'pointer';
-
-      // Thêm sự kiện click cho nút "Ok"
-      okButton.onclick = () => {
-        window.open('https://update.greasyfork.org/scripts/512575/D%C3%B2%20%C4%90%C3%A1p%20%C3%81n%20LMS%20360%20%28UPDATE%20VER%29.user.js');
-        document.body.removeChild(notificationBox); // Đóng thông báo
-      };
-
-      notificationBox.appendChild(okButton);
-    }
-
-    document.body.appendChild(notificationBox);
-
-    // Hiệu ứng slide vào màn hình
-    setTimeout(() => {
-      notificationBox.style.left = '10px';
-    }, 100);
-
-    // Tự động ẩn sau 3 giây
-    setTimeout(() => {
-      notificationBox.style.opacity = '0';
-      notificationBox.style.left = '-300px';
-      setTimeout(() => {
-        document.body.removeChild(notificationBox);
-      }, 500);
-    }, 3000);
-  }
-
-})();
-
-    // Tạo nút để mở cửa sổ nhỏ
-    const button = document.createElement("button");
-    button.innerHTML = "Open Poe.com";
-    button.style.position = "fixed";
-    button.style.bottom = "20px";
-    button.style.right = "20px";
-    button.style.padding = "10px 20px";
-    button.style.backgroundColor = "#007bff";
-    button.style.color = "#fff";
-    button.style.border = "none";
-    button.style.borderRadius = "5px";
-    button.style.cursor = "pointer";
-    button.style.zIndex = "9999";
-
-    button.onclick = function() {
-        // Mở cửa sổ nhỏ với kích thước 800x600
-        window.open("https://poe.com/", "Poe", "width=800,height=600");
-    };
-
-    // Thêm nút vào trang
-    document.body.appendChild(button);
-
 
 (function() {
     'use strict';
@@ -181,7 +20,7 @@
 
 // Hàm để lấy tên người dùng
 function getUserName() {
-    const userNameElement = document.querySelector("#root > div > div.gradient-9.fixed.top-0.iw-full.z-full > div.hidden.lg\\:block.iw-full > div > div.grow.flex.justify-between.items-center.ipr-30.ipy-12 > div.flex.items-center.gap-2 > div.relative.nav-user > div.relative > div.flex.flex-column.items-start.justify-content-center.ih-45.ibg-0d6.itext-13.itext-light.ipy-9.ipx-30.rounded-tr-20.rounded-br-20 > span.text-light.font-bold");
+    const userNameElement = document.querySelector("#root > div > div:nth-child(1) > div > div > div > div.MuiStack-root.css-1qzzrp9 > div > div > div > div.BoxUserInfo.MuiBox-root.css-zzui7f > p.MuiTypography-root.MuiTypography-body1.css-1w1nwdf")
 
     // Kiểm tra xem phần tử có chứa chữ không
     return userNameElement && userNameElement.innerText.trim() ? userNameElement.innerText.trim() : 'Người dùng';
