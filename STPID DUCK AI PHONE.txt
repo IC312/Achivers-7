@@ -1,0 +1,1850 @@
+// ==UserScript==
+// @name          Stupid Duck00 - Mobile Optimized Neo Glass UI
+// @namespace     http://tampermonkey.net/
+// @version       2.2
+// @description   Giao diện kính mờ nâng cao tối ưu cho mobile/tablet với touch support và responsive design 🦆✨
+// @author        Mobile Enhanced Version
+// @match         *://*/*
+// @grant         GM_addStyle
+// @grant         GM_setValue
+// @grant         GM_getValue
+// @grant         GM_deleteValue
+// @grant         GM_xmlhttpRequest
+// @require       https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js
+// @connect       generativelanguage.googleapis.com
+// @connect       api.openai.com
+// @connect       api.anthropic.com
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    /* global html2canvas:true */
+
+    // Chỉ chạy trong top-level frame
+    if (window.top !== window.self) return;
+
+    // Device detection
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const isTablet = /(iPad|tablet|(android(?!.*mobile))|(windows(?!.*phone)(.*touch))|kindle|playbook|silk|(puffin(?!.*(IP|AP|WP))))/i.test(navigator.userAgent);
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+    // Configuration
+    const CONFIG = {
+        API_PROVIDERS: {
+            GEMINI: {
+                name: 'Google Gemini',
+                key: GM_getValue('gemini_key', 'GEMINI_API_KEY'),
+                url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+                model: 'gemini-2.0-flash'
+            },
+            OPENAI: {
+                name: 'OpenAI GPT-4',
+                key: GM_getValue('openai_key', 'OPENAI_API_KEY'),
+                url: 'https://api.openai.com/v1/chat/completions',
+                model: 'gpt-4o-mini'
+            }
+        },
+        THEMES: {
+            DARK: 'dark',
+            LIGHT: 'light',
+            CYBERPUNK: 'cyberpunk'
+        },
+        MAX_HISTORY: 50,
+        RETRY_ATTEMPTS: 3,
+        RETRY_DELAY: 2000,
+        RATE_LIMIT_DELAY: 1000,
+        // Mobile-specific config
+        MOBILE: {
+            MIN_DRAG_DISTANCE: 10, // Minimum distance to start drag
+            TOUCH_TIMEOUT: 300,    // Time to distinguish tap vs drag
+            VIEWPORT_MARGIN: 20    // Margin from screen edges
+        }
+    };
+
+    // State Management
+    const state = {
+        currentProvider: GM_getValue('current_provider', 'GEMINI'),
+        currentTheme: GM_getValue('current_theme', CONFIG.THEMES.DARK),
+        history: JSON.parse(GM_getValue('duck_history', '[]')),
+        isProcessing: false,
+        settings: {
+            fontSize: GM_getValue('font_size', isMobile ? 16 : 14),
+            autoSave: GM_getValue('auto_save', true),
+            soundEnabled: GM_getValue('sound_enabled', false)
+        },
+        // Touch/drag state
+        dragState: {
+            isDragging: false,
+            startX: 0,
+            startY: 0,
+            startTime: 0,
+            element: null
+        }
+    };
+
+    // Utility Functions
+    const utils = {
+        delay: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+
+        formatDate: (date) => {
+            return new Intl.DateTimeFormat('vi-VN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            }).format(date);
+        },
+
+        sanitizeHTML: (str) => {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        },
+
+        // Get touch position from event
+        getTouchPos: (e) => {
+            const touch = e.touches ? e.touches[0] : e;
+            return {
+                x: touch.clientX,
+                y: touch.clientY
+            };
+        },
+
+        // Check if position is within viewport bounds
+        constrainToViewport: (element, x, y) => {
+            const rect = element.getBoundingClientRect();
+            const margin = CONFIG.MOBILE.VIEWPORT_MARGIN;
+            
+            const maxX = window.innerWidth - rect.width - margin;
+            const maxY = window.innerHeight - rect.height - margin;
+            
+            return {
+                x: Math.max(margin, Math.min(x, maxX)),
+                y: Math.max(margin, Math.min(y, maxY))
+            };
+        },
+
+        playNotificationSound: () => {
+            if (!state.settings.soundEnabled) return;
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+            const createTone = (frequency, duration, volume = 0.1) => {
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.frequency.value = frequency;
+                oscillator.type = 'sine';
+
+                gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+                gainNode.gain.linearRampToValueAtTime(volume, audioContext.currentTime + 0.05);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + duration);
+            };
+
+            createTone(523.25, 0.2);
+            setTimeout(() => createTone(659.25, 0.2), 200);
+            setTimeout(() => createTone(783.99, 0.3), 400);
+        },
+
+        saveToHistory: (entry) => {
+            state.history.unshift({
+                id: Date.now(),
+                timestamp: new Date(),
+                ...entry
+            });
+
+            if (state.history.length > CONFIG.MAX_HISTORY) {
+                state.history = state.history.slice(0, CONFIG.MAX_HISTORY);
+            }
+
+            GM_setValue('duck_history', JSON.stringify(state.history));
+        }
+    };
+
+    // API Handlers (unchanged from original)
+    const apiHandlers = {
+        async xmlHttpRequestPromise(config) {
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    ...config,
+                    onload: (response) => {
+                        if (response.status >= 200 && response.status < 300) {
+                            resolve(response);
+                        } else {
+                            reject(new Error(`HTTP ${response.status}: ${response.statusText}\nResponse: ${response.responseText}`));
+                        }
+                    },
+                    onerror: (error) => reject(new Error(`Network error: ${error.error || 'Unknown error'}`)),
+                    ontimeout: () => reject(new Error('Request timeout'))
+                });
+            });
+        },
+
+        async fetchWithRetry(config, retries = CONFIG.RETRY_ATTEMPTS) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await this.xmlHttpRequestPromise(config);
+
+                    if (response.status === 429) {
+                        if (i === retries - 1) throw new Error('Quá nhiều yêu cầu. Vui lòng thử lại sau vài phút.');
+                        const delay = CONFIG.RETRY_DELAY * Math.pow(2, i);
+                        console.log(`Rate limited, retrying in ${delay}ms...`);
+                        await utils.delay(delay);
+                        continue;
+                    }
+
+                    return response;
+                } catch (error) {
+                    console.error(`Attempt ${i + 1} failed:`, error);
+                    if (i === retries - 1) throw error;
+                    await utils.delay(CONFIG.RETRY_DELAY);
+                }
+            }
+        },
+
+        async sendToGemini(imageDataURL, description) {
+            const provider = CONFIG.API_PROVIDERS.GEMINI;
+            if (!provider.key) throw new Error('Chưa cấu hình API key cho Gemini');
+
+            const mimeType = imageDataURL.match(/data:(image\/[^;]+);/)[1];
+            const base64Data = imageDataURL.split(',')[1];
+
+            const body = {
+                contents: [{
+                    parts: [
+                        { text: `Nói tiếng Việt và giúp tôi giải bài tập trong ảnh. Mô tả: ${description || 'Không có mô tả'}` },
+                        { inlineData: { mimeType, data: base64Data } }
+                    ]
+                }]
+            };
+
+            try {
+                const response = await this.fetchWithRetry({
+                    method: 'POST',
+                    url: `${provider.url}?key=${provider.key}`,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    data: JSON.stringify(body),
+                    timeout: 30000
+                });
+
+                const data = JSON.parse(response.responseText);
+                const result = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                if (!result) {
+                    console.error('Gemini response:', data);
+                    throw new Error("Không nhận được phản hồi từ Gemini. Vui lòng kiểm tra API key hoặc thử lại.");
+                }
+                return result;
+            } catch (error) {
+                console.error('Gemini API Error:', error);
+                if (error.message.includes('429')) {
+                    throw new Error('Gemini API bị giới hạn. Vui lòng thử lại sau.');
+                }
+                if (error.message.includes('401') || error.message.includes('403')) {
+                    throw new Error('API key Gemini không hợp lệ. Vui lòng kiểm tra lại.');
+                }
+                throw new Error(`Lỗi Gemini API: ${error.message}`);
+            }
+        },
+
+        async sendToOpenAI(imageDataURL, description) {
+            const provider = CONFIG.API_PROVIDERS.OPENAI;
+            if (!provider.key) throw new Error('Chưa cấu hình API key cho OpenAI');
+
+            if (!provider.key.startsWith('sk-')) {
+                throw new Error('API key OpenAI không đúng định dạng. Key phải bắt đầu bằng "sk-"');
+            }
+
+            const body = {
+                model: provider.model,
+                messages: [{
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: `Nói tiếng Việt và giúp tôi giải bài tập trong ảnh. Mô tả: ${description || 'Không có mô tả'}`
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: imageDataURL,
+                                detail: "high"
+                            }
+                        }
+                    ]
+                }],
+                max_tokens: 1500,
+                temperature: 0.7
+            };
+
+            try {
+                await utils.delay(CONFIG.RATE_LIMIT_DELAY);
+
+                const response = await this.fetchWithRetry({
+                    method: 'POST',
+                    url: provider.url,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${provider.key}`,
+                        'User-Agent': 'StupidDuck/1.0'
+                    },
+                    data: JSON.stringify(body),
+                    timeout: 60000
+                });
+
+                const data = JSON.parse(response.responseText);
+                console.log('OpenAI Response:', data);
+
+                const result = data.choices?.[0]?.message?.content;
+
+                if (!result) {
+                    console.error('OpenAI response:', data);
+                    if (data.error) {
+                        throw new Error(`OpenAI API Error: ${data.error.message}`);
+                    }
+                    throw new Error("Không nhận được phản hồi từ OpenAI. Vui lòng thử lại.");
+                }
+
+                return result;
+            } catch (error) {
+                console.error('OpenAI API Error:', error);
+
+                if (error.message.includes('429')) {
+                    throw new Error('OpenAI API bị giới hạn tốc độ. Vui lòng chờ một lúc rồi thử lại.');
+                }
+                if (error.message.includes('401')) {
+                    throw new Error('API key OpenAI không hợp lệ hoặc đã hết hạn. Vui lòng kiểm tra lại.');
+                }
+                if (error.message.includes('403')) {
+                    throw new Error('API key OpenAI không có quyền truy cập endpoint này.');
+                }
+                if (error.message.includes('insufficient_quota')) {
+                    throw new Error('Tài khoản OpenAI đã hết quota. Vui lòng nạp thêm credit.');
+                }
+                if (error.message.includes('model_not_found')) {
+                    throw new Error(`Model ${provider.model} không tồn tại hoặc không có quyền truy cập.`);
+                }
+
+                throw new Error(`Lỗi OpenAI API: ${error.message}`);
+            }
+        }
+    };
+
+    // Theme Manager (unchanged)
+    const themeManager = {
+        themes: {
+            [CONFIG.THEMES.DARK]: {
+                primary: 'rgba(18, 18, 18, 0.9)',
+                secondary: 'rgba(30, 30, 30, 0.8)',
+                accent: '#4caf50',
+                text: '#e0e0e0',
+                border: 'rgba(255, 255, 255, 0.1)'
+            },
+            [CONFIG.THEMES.LIGHT]: {
+                primary: 'rgba(255, 255, 255, 0.9)',
+                secondary: 'rgba(240, 240, 240, 0.8)',
+                accent: '#2196f3',
+                text: '#333333',
+                border: 'rgba(0, 0, 0, 0.1)'
+            },
+            [CONFIG.THEMES.CYBERPUNK]: {
+                primary: 'rgba(0, 15, 25, 0.9)',
+                secondary: 'rgba(0, 25, 40, 0.8)',
+                accent: '#00ffff',
+                text: '#00ff00',
+                border: 'rgba(0, 255, 255, 0.3)'
+            }
+        },
+
+        apply(theme) {
+            const colors = this.themes[theme];
+            if (!colors) return;
+
+            state.currentTheme = theme;
+            GM_setValue('current_theme', theme);
+
+            document.documentElement.style.setProperty('--duck-primary', colors.primary);
+            document.documentElement.style.setProperty('--duck-secondary', colors.secondary);
+            document.documentElement.style.setProperty('--duck-accent', colors.accent);
+            document.documentElement.style.setProperty('--duck-text', colors.text);
+            document.documentElement.style.setProperty('--duck-border', colors.border);
+        }
+    };
+
+    // Enhanced UI Components for Mobile
+    const ui = {
+        createElement(tag, className, innerHTML) {
+            const el = document.createElement(tag);
+            if (className) el.className = className;
+            if (innerHTML) el.innerHTML = innerHTML;
+            return el;
+        },
+
+        createProgressBar() {
+            return this.createElement('div', 'duck-progress-container', `
+                <div class="duck-progress-bar">
+                    <div class="duck-progress-fill"></div>
+                </div>
+                <div class="duck-progress-text">Đang xử lý...</div>
+            `);
+        },
+
+        createHistoryPanel() {
+            const panel = this.createElement('div', 'duck-history-panel');
+            this.updateHistoryPanel(panel);
+            return panel;
+        },
+
+        updateHistoryPanel(panel) {
+            if (state.history.length === 0) {
+                panel.innerHTML = '<div class="duck-no-history">Chưa có lịch sử</div>';
+                return;
+            }
+
+            panel.innerHTML = state.history.map(entry => `
+                <div class="duck-history-item" data-id="${entry.id}">
+                    <div class="duck-history-header">
+                        <span class="duck-history-date">${utils.formatDate(new Date(entry.timestamp))}</span>
+                        <button class="duck-history-delete" data-id="${entry.id}">×</button>
+                    </div>
+                    <div class="duck-history-desc">${entry.description || 'Không có mô tả'}</div>
+                    <div class="duck-history-preview">${entry.result.substring(0, 100)}...</div>
+                </div>
+            `).join('');
+
+            // Add event listeners with touch support
+            panel.querySelectorAll('.duck-history-delete').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = parseInt(btn.dataset.id);
+                    state.history = state.history.filter(item => item.id !== id);
+                    GM_setValue('duck_history', JSON.stringify(state.history));
+                    this.updateHistoryPanel(panel);
+                });
+            });
+
+            panel.querySelectorAll('.duck-history-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const id = parseInt(item.dataset.id);
+                    const entry = state.history.find(h => h.id === id);
+                    if (entry) {
+                        document.getElementById('duck-desc').value = entry.description || '';
+                        document.getElementById('duck-result').innerHTML = entry.result.replace(/\n/g, '<br>');
+                    }
+                });
+            });
+        },
+
+        createSettingsPanel() {
+            return this.createElement('div', 'duck-settings-panel', `
+                <div class="duck-settings-section">
+                    <h4>AI Provider</h4>
+                    <select id="duck-provider-select">
+                        <option value="GEMINI" ${state.currentProvider === 'GEMINI' ? 'selected' : ''}>Google Gemini</option>
+                        <option value="OPENAI" ${state.currentProvider === 'OPENAI' ? 'selected' : ''}>OpenAI GPT-4</option>
+                    </select>
+                </div>
+
+                <div class="duck-settings-section">
+                    <h4>API Keys</h4>
+                    <div class="duck-key-input">
+                        <label>Gemini API Key:</label>
+                        <input type="password" id="duck-gemini-key" value="${CONFIG.API_PROVIDERS.GEMINI.key}" placeholder="Nhập API key">
+                    </div>
+                    <div class="duck-key-input">
+                        <label>OpenAI API Key:</label>
+                        <input type="password" id="duck-openai-key" value="${CONFIG.API_PROVIDERS.OPENAI.key}" placeholder="Nhập API key">
+                    </div>
+                </div>
+
+                <div class="duck-settings-section">
+                    <h4>Giao diện</h4>
+                    <select id="duck-theme-select">
+                        <option value="${CONFIG.THEMES.DARK}" ${state.currentTheme === CONFIG.THEMES.DARK ? 'selected' : ''}>Dark</option>
+                        <option value="${CONFIG.THEMES.LIGHT}" ${state.currentTheme === CONFIG.THEMES.LIGHT ? 'selected' : ''}>Light</option>
+                        <option value="${CONFIG.THEMES.CYBERPUNK}" ${state.currentTheme === CONFIG.THEMES.CYBERPUNK ? 'selected' : ''}>Cyberpunk</option>
+                    </select>
+                </div>
+
+                <div class="duck-settings-section">
+                    <h4>Khác</h4>
+                    <label class="duck-checkbox">
+                        <input type="checkbox" id="duck-sound-toggle" ${state.settings.soundEnabled ? 'checked' : ''}>
+                        Âm thanh thông báo
+                    </label>
+                    <label class="duck-slider">
+                        Font size: <span id="duck-font-size-value">${state.settings.fontSize}px</span>
+                        <input type="range" id="duck-font-size" min="12" max="24" value="${state.settings.fontSize}">
+                    </label>
+                </div>
+
+                <div class="duck-settings-actions">
+                    <button id="duck-save-settings" class="duck-btn-primary">💾 Lưu cài đặt</button>
+                    <button id="duck-reset-settings" class="duck-btn-secondary">🔄 Khôi phục mặc định</button>
+                </div>
+            `);
+        }
+    };
+
+    // Enhanced Mobile Drag Handler
+    class MobileDragHandler {
+        constructor() {
+            this.iframeBlocker = document.createElement("div");
+            Object.assign(this.iframeBlocker.style, {
+                position: "fixed",
+                top: "0",
+                left: "0",
+                width: "100vw",
+                height: "100vh",
+                zIndex: "999998",
+                cursor: "grabbing",
+                display: "none",
+                touchAction: "none"
+            });
+            document.body.appendChild(this.iframeBlocker);
+        }
+
+        makeDraggable(element) {
+            let dragState = {
+                isDragging: false,
+                startX: 0,
+                startY: 0,
+                startTime: 0,
+                elementStartX: 0,
+                elementStartY: 0
+            };
+
+            // Touch start handler
+            const handleStart = (e) => {
+                const target = e.target;
+                
+                // Only allow dragging from header or when minimized
+                if (!target.closest('.duck-draggable') && !element.classList.contains('duck-minimized')) {
+                    return;
+                }
+
+                const pos = utils.getTouchPos(e);
+                const rect = element.getBoundingClientRect();
+                
+                dragState = {
+                    isDragging: false,
+                    startX: pos.x,
+                    startY: pos.y,
+                    startTime: Date.now(),
+                    elementStartX: rect.left,
+                    elementStartY: rect.top
+                };
+
+                e.preventDefault();
+                element.style.transition = 'none';
+                this.iframeBlocker.style.display = 'block';
+            };
+
+            // Touch move handler
+            const handleMove = (e) => {
+                if (!this.iframeBlocker.style.display || this.iframeBlocker.style.display === 'none') return;
+
+                const pos = utils.getTouchPos(e);
+                const deltaX = pos.x - dragState.startX;
+                const deltaY = pos.y - dragState.startY;
+                const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+                // Start dragging if moved enough distance
+                if (!dragState.isDragging && distance > CONFIG.MOBILE.MIN_DRAG_DISTANCE) {
+                    dragState.isDragging = true;
+                    element.classList.add('duck-dragging');
+                }
+
+                if (dragState.isDragging) {
+                    const newX = dragState.elementStartX + deltaX;
+                    const newY = dragState.elementStartY + deltaY;
+                    
+                    const constrained = utils.constrainToViewport(element, newX, newY);
+                    
+                    element.style.left = `${constrained.x}px`;
+                    element.style.top = `${constrained.y}px`;
+                    
+                    e.preventDefault();
+                }
+            };
+
+            // Touch end handler
+            const handleEnd = (e) => {
+                if (this.iframeBlocker.style.display === 'none') return;
+
+                const timeDiff = Date.now() - dragState.startTime;
+                
+                // If it was a quick tap (not drag), treat as click
+                if (!dragState.isDragging && timeDiff < CONFIG.MOBILE.TOUCH_TIMEOUT) {
+                    if (element.classList.contains('duck-minimized')) {
+                        // Restore from minimized state
+                        element.dispatchEvent(new CustomEvent('duckRestore'));
+                    }
+                }
+
+                this.iframeBlocker.style.display = 'none';
+                element.style.transition = '';
+                element.classList.remove('duck-dragging');
+                
+                dragState.isDragging = false;
+            };
+
+            // Add both mouse and touch listeners
+            if (isTouchDevice) {
+                element.addEventListener('touchstart', handleStart, { passive: false });
+                document.addEventListener('touchmove', handleMove, { passive: false });
+                document.addEventListener('touchend', handleEnd);
+                document.addEventListener('touchcancel', handleEnd);
+            } else {
+                element.addEventListener('mousedown', handleStart);
+                document.addEventListener('mousemove', handleMove);
+                document.addEventListener('mouseup', handleEnd);
+            }
+        }
+    }
+
+    // Main Application Enhanced for Mobile
+    class StupidDuckApp {
+        constructor() {
+            this.dragHandler = new MobileDragHandler();
+            this.createMainUI();
+            this.attachEventListeners();
+            this.positionForDevice();
+            themeManager.apply(state.currentTheme);
+            this.applyFontSize();
+        }
+
+        positionForDevice() {
+            // Position UI based on device type
+            const margin = CONFIG.MOBILE.VIEWPORT_MARGIN;
+            
+            if (isMobile) {
+                // On mobile, center horizontally and position near top
+                this.mainUI.style.left = `${margin}px`;
+                this.mainUI.style.top = `${margin + 20}px`;
+                this.mainUI.style.right = `${margin}px`;
+                this.mainUI.style.width = `calc(100vw - ${margin * 2}px)`;
+            } else if (isTablet) {
+                // On tablet, use more space but keep manageable
+                this.mainUI.style.left = `${margin * 2}px`;
+                this.mainUI.style.top = `${margin * 2}px`;
+                this.mainUI.style.width = `min(500px, calc(100vw - ${margin * 4}px))`;
+            } else {
+                // Desktop - original positioning
+                this.mainUI.style.left = '80px';
+                this.mainUI.style.top = '80px';
+                this.mainUI.style.width = '420px';
+            }
+
+            // Position minimized button
+            this.minimizedBtn.style.left = `${margin}px`;
+            this.minimizedBtn.style.top = `${margin}px`;
+        }
+
+        createMainUI() {
+            // Add mobile-optimized styles
+            GM_addStyle(this.getMobileOptimizedStyles());
+
+            // Main UI container
+            this.mainUI = ui.createElement('div', 'duck-main-ui');
+            this.mainUI.innerHTML = `
+                <div class="duck-header duck-draggable">
+                    <h2>🦆 Stupid Duck AI 🦆</h2>
+                    <div class="duck-header-controls">
+                        <button id="duck-settings-btn" class="duck-control-btn" title="Cài đặt">⚙️</button>
+                        <button id="duck-history-btn" class="duck-control-btn" title="Lịch sử">📋</button>
+                        <button id="duck-minimize-btn" class="duck-control-btn" title="Thu nhỏ">➖</button>
+                        <button id="duck-close-btn" class="duck-control-btn duck-close" title="Đóng">✕</button>
+                    </div>
+                </div>
+
+                <div class="duck-tabs">
+                    <button class="duck-tab active" data-tab="main">Giải bài</button>
+                    <button class="duck-tab" data-tab="history">Lịch sử</button>
+                    <button class="duck-tab" data-tab="settings">Cài đặt</button>
+                </div>
+
+                <div class="duck-content">
+                    <div class="duck-tab-content active" id="duck-main-tab">
+                        <div class="duck-input-group">
+                            <label>Mô tả bài tập (tùy chọn):</label>
+                            <textarea id="duck-desc" placeholder="Mô tả chi tiết về bài tập cần giải..."></textarea>
+                        </div>
+
+                        <div class="duck-provider-info">
+                            <span>Provider: <strong id="duck-current-provider">${CONFIG.API_PROVIDERS[state.currentProvider].name}</strong></span>
+                        </div>
+
+                        <div class="duck-actions">
+                            <button id="duck-solve-btn" class="duck-btn-primary">
+                                📷 Chụp màn hình & Giải bài
+                            </button>
+                            <button id="duck-clear-btn" class="duck-btn-secondary">🗑️ Xóa kết quả</button>
+                        </div>
+
+                        <div id="duck-progress" style="display: none;"></div>
+                        <div id="duck-error" class="duck-error"></div>
+                        <div id="duck-result" class="duck-result"></div>
+                    </div>
+
+                    <div class="duck-tab-content" id="duck-history-tab"></div>
+                    <div class="duck-tab-content" id="duck-settings-tab"></div>
+                </div>
+            `;
+
+            // Minimized button - enhanced for mobile
+            this.minimizedBtn = ui.createElement('div', 'duck-minimized');
+            this.minimizedBtn.innerHTML = '<span class="duck-minimized-text">Duck</span>';
+            this.minimizedBtn.title = 'Hiện lại Stupid Duck';
+
+            // Append to body
+            document.body.appendChild(this.mainUI);
+            document.body.appendChild(this.minimizedBtn);
+
+            // Make draggable with mobile support
+            this.dragHandler.makeDraggable(this.mainUI);
+            this.dragHandler.makeDraggable(this.minimizedBtn);
+
+            // Initialize tab contents
+            this.initializeTabContents();
+
+            // Add custom restore event listener
+            this.minimizedBtn.addEventListener('duckRestore', () => {
+                this.restore();
+            });
+        }
+
+        initializeTabContents() {
+            // History tab
+            const historyTab = this.mainUI.querySelector('#duck-history-tab');
+            const historyPanel = ui.createHistoryPanel();
+            historyTab.appendChild(historyPanel);
+
+            // Settings tab
+            const settingsTab = this.mainUI.querySelector('#duck-settings-tab');
+            const settingsPanel = ui.createSettingsPanel();
+            settingsTab.appendChild(settingsPanel);
+
+            // Progress bar
+            const progressContainer = this.mainUI.querySelector('#duck-progress');
+            const progressBar = ui.createProgressBar();
+            progressContainer.appendChild(progressBar);
+        }
+
+        attachEventListeners() {
+            // Tab switching with touch-friendly interaction
+            this.mainUI.querySelectorAll('.duck-tab').forEach(tab => {
+                const handler = () => this.switchTab(tab.dataset.tab);
+                tab.addEventListener('click', handler);
+                if (isTouchDevice) {
+                    tab.addEventListener('touchend', (e) => {
+                        e.preventDefault();
+                        handler();
+                    });
+                }
+            });
+
+            // Main actions
+            this.mainUI.querySelector('#duck-solve-btn').addEventListener('click', () => this.handleSolve());
+            this.mainUI.querySelector('#duck-clear-btn').addEventListener('click', () => this.clearResult());
+
+            // Header controls with improved touch handling
+            this.attachHeaderControls();
+
+            // Settings with mobile optimization
+            this.attachSettingsListeners();
+        }
+
+        attachHeaderControls() {
+            const addControlListener = (selector, handler) => {
+                const btn = this.mainUI.querySelector(selector);
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handler();
+                });
+                
+                if (isTouchDevice) {
+                    btn.addEventListener('touchend', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handler();
+                    });
+                }
+            };
+
+            addControlListener('#duck-minimize-btn', () => this.minimize());
+            addControlListener('#duck-close-btn', () => this.close());
+            addControlListener('#duck-history-btn', () => this.switchTab('history'));
+            addControlListener('#duck-settings-btn', () => this.switchTab('settings'));
+        }
+
+        attachSettingsListeners() {
+            const settingsPanel = this.mainUI.querySelector('#duck-settings-tab');
+
+            // API Keys
+            settingsPanel.querySelector('#duck-gemini-key').addEventListener('change', (e) => {
+                CONFIG.API_PROVIDERS.GEMINI.key = e.target.value;
+                GM_setValue('gemini_key', e.target.value);
+            });
+
+            settingsPanel.querySelector('#duck-openai-key').addEventListener('change', (e) => {
+                CONFIG.API_PROVIDERS.OPENAI.key = e.target.value;
+                GM_setValue('openai_key', e.target.value);
+            });
+
+            // Provider selection
+            settingsPanel.querySelector('#duck-provider-select').addEventListener('change', (e) => {
+                state.currentProvider = e.target.value;
+                GM_setValue('current_provider', e.target.value);
+                this.mainUI.querySelector('#duck-current-provider').textContent = CONFIG.API_PROVIDERS[e.target.value].name;
+            });
+
+            // Theme selection
+            settingsPanel.querySelector('#duck-theme-select').addEventListener('change', (e) => {
+                themeManager.apply(e.target.value);
+            });
+
+            // Font size slider
+            const fontSizeSlider = settingsPanel.querySelector('#duck-font-size');
+            const fontSizeValue = settingsPanel.querySelector('#duck-font-size-value');
+
+            fontSizeSlider.addEventListener('input', (e) => {
+                const size = parseInt(e.target.value);
+                fontSizeValue.textContent = size + 'px';
+                state.settings.fontSize = size;
+                this.applyFontSize();
+                GM_setValue('font_size', size);
+            });
+
+            // Sound toggle
+            settingsPanel.querySelector('#duck-sound-toggle').addEventListener('change', (e) => {
+                state.settings.soundEnabled = e.target.checked;
+                GM_setValue('sound_enabled', e.target.checked);
+            });
+
+            // Save settings
+            settingsPanel.querySelector('#duck-save-settings').addEventListener('click', () => {
+                this.saveAllSettings();
+                this.showNotification('Đã lưu cài đặt thành công!', 'success');
+            });
+
+            // Reset settings
+            settingsPanel.querySelector('#duck-reset-settings').addEventListener('click', () => {
+                if (confirm('Bạn có chắc muốn khôi phục tất cả cài đặt về mặc định?')) {
+                    this.resetSettings();
+                }
+            });
+        }
+
+        applyFontSize() {
+            this.mainUI.style.fontSize = state.settings.fontSize + 'px';
+            document.documentElement.style.setProperty('--duck-font-size', state.settings.fontSize + 'px');
+        }
+
+        async handleSolve() {
+            if (state.isProcessing) return;
+
+            try {
+                state.isProcessing = true;
+                this.showProgress();
+                this.clearError();
+
+                const currentProvider = CONFIG.API_PROVIDERS[state.currentProvider];
+                if (!currentProvider.key) {
+                    throw new Error(`Chưa cấu hình API key cho ${currentProvider.name}. Vui lòng vào tab Cài đặt để cấu hình.`);
+                }
+
+                // Take screenshot with mobile optimization
+                this.updateProgress('Đang chụp màn hình...', 20);
+                const canvas = await html2canvas(document.body, {
+                    useCORS: true,
+                    allowTaint: true,
+                    scale: isMobile ? 0.6 : 0.8, // Lower scale for mobile to reduce memory usage
+                    backgroundColor: null,
+                    logging: false // Disable logging on mobile
+                });
+                const imageDataURL = canvas.toDataURL("image/png", isMobile ? 0.7 : 0.8);
+
+                // Send to AI
+                this.updateProgress('Đang gửi đến AI...', 60);
+                const description = this.mainUI.querySelector('#duck-desc').value;
+
+                let result;
+                if (state.currentProvider === 'GEMINI') {
+                    result = await apiHandlers.sendToGemini(imageDataURL, description);
+                } else if (state.currentProvider === 'OPENAI') {
+                    result = await apiHandlers.sendToOpenAI(imageDataURL, description);
+                }
+
+                this.updateProgress('Hoàn thành!', 100);
+                await utils.delay(500);
+
+                // Display result
+                this.displayResult(result);
+
+                // Save to history
+                utils.saveToHistory({
+                    description,
+                    result,
+                    provider: state.currentProvider
+                });
+
+                utils.playNotificationSound();
+
+            } catch (error) {
+                this.showError(error.message);
+                console.error('Duck AI Error:', error);
+            } finally {
+                state.isProcessing = false;
+                this.hideProgress();
+            }
+        }
+
+        switchTab(tabName) {
+            this.mainUI.querySelectorAll('.duck-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.tab === tabName);
+            });
+
+            this.mainUI.querySelectorAll('.duck-tab-content').forEach(content => {
+                content.classList.toggle('active', content.id === `duck-${tabName}-tab`);
+            });
+
+            if (tabName === 'history') {
+                const historyPanel = this.mainUI.querySelector('#duck-history-tab .duck-history-panel');
+                if (historyPanel) {
+                    ui.updateHistoryPanel(historyPanel);
+                }
+            }
+        }
+
+        showProgress() {
+            this.mainUI.querySelector('#duck-progress').style.display = 'block';
+            this.mainUI.querySelector('#duck-solve-btn').disabled = true;
+        }
+
+        hideProgress() {
+            this.mainUI.querySelector('#duck-progress').style.display = 'none';
+            this.mainUI.querySelector('#duck-solve-btn').disabled = false;
+        }
+
+        updateProgress(text, percent) {
+            const progressContainer = this.mainUI.querySelector('#duck-progress');
+            const progressText = progressContainer.querySelector('.duck-progress-text');
+            const progressFill = progressContainer.querySelector('.duck-progress-fill');
+
+            if (progressText) progressText.textContent = text;
+            if (progressFill) progressFill.style.width = `${percent}%`;
+        }
+
+        displayResult(result) {
+            const resultContainer = this.mainUI.querySelector('#duck-result');
+            resultContainer.innerHTML = result.replace(/\n/g, '<br>');
+            resultContainer.scrollTop = 0;
+        }
+
+        clearResult() {
+            this.mainUI.querySelector('#duck-result').innerHTML = '';
+            this.mainUI.querySelector('#duck-desc').value = '';
+            this.clearError();
+        }
+
+        showError(message) {
+            const errorContainer = this.mainUI.querySelector('#duck-error');
+            errorContainer.textContent = '⚠ ' + message;
+        }
+
+        clearError() {
+            this.mainUI.querySelector('#duck-error').textContent = '';
+        }
+
+        showNotification(message, type = 'info') {
+            const notification = ui.createElement('div', `duck-notification duck-notification-${type}`);
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.classList.add('duck-notification-show');
+            }, 100);
+
+            setTimeout(() => {
+                notification.classList.remove('duck-notification-show');
+                setTimeout(() => document.body.removeChild(notification), 300);
+            }, 3000);
+        }
+
+        minimize() {
+            this.mainUI.style.display = 'none';
+            this.minimizedBtn.style.display = 'flex';
+        }
+
+        restore() {
+            this.mainUI.style.display = 'block';
+            this.minimizedBtn.style.display = 'none';
+        }
+
+        close() {
+            if (confirm('Bạn có chắc muốn đóng Stupid Duck?')) {
+                this.mainUI.style.display = 'none';
+                this.minimizedBtn.style.display = 'none';
+            }
+        }
+
+        saveAllSettings() {
+            Object.keys(state.settings).forEach(key => {
+                GM_setValue(key, state.settings[key]);
+            });
+        }
+
+        resetSettings() {
+            GM_deleteValue('gemini_key');
+            GM_deleteValue('openai_key');
+            GM_deleteValue('current_provider');
+            GM_deleteValue('current_theme');
+            GM_deleteValue('font_size');
+            GM_deleteValue('sound_enabled');
+            GM_deleteValue('auto_save');
+
+            location.reload();
+        }
+
+        getMobileOptimizedStyles() {
+            return `
+            :root {
+                --duck-primary: rgba(18, 18, 18, 0.95);
+                --duck-secondary: rgba(30, 30, 30, 0.9);
+                --duck-accent: #4caf50;
+                --duck-text: #e0e0e0;
+                --duck-border: rgba(255, 255, 255, 0.1);
+                --duck-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+                --duck-radius: ${isMobile ? '12px' : '16px'};
+                --duck-font-size: ${state.settings.fontSize}px;
+                --duck-touch-size: ${isMobile ? '48px' : '32px'};
+                --duck-spacing: ${isMobile ? '16px' : '20px'};
+            }
+
+            /* Improved animations for mobile */
+            @keyframes duck-fade-in {
+                from { 
+                    opacity: 0; 
+                    transform: scale(0.9) translateY(-10px); 
+                }
+                to { 
+                    opacity: 1; 
+                    transform: scale(1) translateY(0); 
+                }
+            }
+
+            @keyframes duck-slide-in {
+                from { transform: translateX(-50%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+
+            @keyframes duck-progress {
+                0% { background-position: 0% 50%; }
+                50% { background-position: 100% 50%; }
+                100% { background-position: 0% 50%; }
+            }
+
+            /* Main UI - Mobile Optimized */
+            .duck-main-ui {
+                position: fixed;
+                backdrop-filter: blur(20px);
+                background: var(--duck-primary);
+                border-radius: var(--duck-radius);
+                border: 1px solid var(--duck-border);
+                box-shadow: var(--duck-shadow);
+                z-index: 999999;
+                font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+                font-size: var(--duck-font-size);
+                color: var(--duck-text);
+                animation: duck-fade-in 0.4s ease-out;
+                overflow: hidden;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                max-height: ${isMobile ? '85vh' : '600px'};
+                max-width: ${isMobile ? '95vw' : '420px'};
+                min-width: ${isMobile ? '280px' : '380px'};
+            }
+
+            .duck-main-ui:hover {
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.9);
+            }
+
+            .duck-main-ui.duck-dragging {
+                opacity: 0.8;
+                transform: scale(1.02);
+                box-shadow: 0 15px 45px rgba(0, 0, 0, 0.9);
+            }
+
+            /* Header - Touch Optimized */
+            .duck-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: var(--duck-spacing);
+                background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(0,0,0,0.1));
+                border-bottom: 1px solid var(--duck-border);
+                cursor: move;
+                user-select: none;
+                min-height: var(--duck-touch-size);
+                touch-action: none;
+            }
+
+            .duck-header h2 {
+                margin: 0;
+                font-size: ${isMobile ? '16px' : '18px'};
+                font-weight: 600;
+                background: linear-gradient(45deg, var(--duck-accent), #81c784);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                pointer-events: none;
+                line-height: 1.2;
+            }
+
+            /* Control buttons - Touch friendly */
+            .duck-header-controls {
+                display: flex;
+                gap: ${isMobile ? '12px' : '8px'};
+            }
+
+            .duck-control-btn {
+                min-width: var(--duck-touch-size);
+                min-height: var(--duck-touch-size);
+                border: none;
+                border-radius: ${isMobile ? '8px' : '6px'};
+                background: rgba(255, 255, 255, 0.1);
+                color: var(--duck-text);
+                cursor: pointer;
+                font-size: ${isMobile ? '16px' : '14px'};
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: all 0.2s ease;
+                z-index: 10;
+                position: relative;
+                touch-action: manipulation;
+            }
+
+            .duck-control-btn:hover, .duck-control-btn:active {
+                background: rgba(255, 255, 255, 0.2);
+                transform: scale(1.05);
+            }
+
+            .duck-control-btn.duck-close {
+                background: rgba(244, 67, 54, 0.8);
+            }
+
+            .duck-control-btn.duck-close:hover, .duck-control-btn.duck-close:active {
+                background: rgba(244, 67, 54, 1);
+            }
+
+            /* Tabs - Mobile friendly */
+            .duck-tabs {
+                display: flex;
+                background: rgba(0, 0, 0, 0.2);
+                border-bottom: 1px solid var(--duck-border);
+                overflow-x: auto;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+            }
+
+            .duck-tabs::-webkit-scrollbar {
+                display: none;
+            }
+
+            .duck-tab {
+                flex: 1;
+                padding: ${isMobile ? '14px 12px' : '12px 16px'};
+                border: none;
+                background: transparent;
+                color: rgba(224, 224, 224, 0.7);
+                cursor: pointer;
+                font-size: ${isMobile ? '14px' : '13px'};
+                font-weight: 500;
+                transition: all 0.2s ease;
+                position: relative;
+                min-width: ${isMobile ? '80px' : '60px'};
+                white-space: nowrap;
+                touch-action: manipulation;
+            }
+
+            .duck-tab:hover, .duck-tab:active {
+                color: var(--duck-text);
+                background: rgba(255, 255, 255, 0.05);
+            }
+
+            .duck-tab.active {
+                color: var(--duck-accent);
+                background: rgba(255, 255, 255, 0.1);
+            }
+
+            .duck-tab.active::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 2px;
+                background: var(--duck-accent);
+            }
+
+            /* Content area with improved scrolling */
+            .duck-content {
+                max-height: ${isMobile ? '70vh' : '450px'};
+                overflow-y: auto;
+                scrollbar-width: thin;
+                scrollbar-color: var(--duck-accent) transparent;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .duck-content::-webkit-scrollbar {
+                width: ${isMobile ? '8px' : '6px'};
+            }
+
+            .duck-content::-webkit-scrollbar-track {
+                background: transparent;
+            }
+
+            .duck-content::-webkit-scrollbar-thumb {
+                background: var(--duck-accent);
+                border-radius: ${isMobile ? '4px' : '3px'};
+                min-height: 30px;
+            }
+
+            .duck-tab-content {
+                display: none;
+                padding: var(--duck-spacing);
+                animation: duck-slide-in 0.3s ease-out;
+            }
+
+            .duck-tab-content.active {
+                display: block;
+            }
+
+            /* Form elements - Touch optimized */
+            .duck-input-group {
+                margin-bottom: ${isMobile ? '20px' : '16px'};
+            }
+
+            .duck-input-group label {
+                display: block;
+                margin-bottom: 8px;
+                font-size: ${isMobile ? '14px' : '13px'};
+                font-weight: 500;
+                color: rgba(224, 224, 224, 0.9);
+            }
+
+            .duck-input-group textarea {
+                width: 100%;
+                height: ${isMobile ? '100px' : '80px'};
+                padding: ${isMobile ? '16px' : '12px'};
+                border: 1px solid var(--duck-border);
+                border-radius: ${isMobile ? '12px' : '10px'};
+                background: var(--duck-secondary) !important;
+                color: var(--duck-text) !important;
+                font-size: var(--duck-font-size);
+                font-family: inherit;
+                resize: vertical;
+                outline: none;
+                transition: all 0.2s ease;
+                box-sizing: border-box;
+                touch-action: manipulation;
+            }
+
+            .duck-input-group textarea:focus {
+                border-color: var(--duck-accent);
+                box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+            }
+
+            /* Provider info */
+            .duck-provider-info {
+                background: rgba(0, 0, 0, 0.3);
+                padding: ${isMobile ? '12px' : '8px 12px'};
+                border-radius: ${isMobile ? '10px' : '8px'};
+                margin-bottom: ${isMobile ? '20px' : '16px'};
+                font-size: ${isMobile ? '14px' : '12px'};
+                text-align: center;
+            }
+
+            .duck-provider-info strong {
+                color: var(--duck-accent);
+            }
+
+            /* Action buttons - Mobile friendly */
+            .duck-actions {
+                display: flex;
+                flex-direction: ${isMobile ? 'column' : 'row'};
+                gap: ${isMobile ? '12px' : '10px'};
+                margin-bottom: ${isMobile ? '20px' : '16px'};
+            }
+
+            .duck-btn-primary, .duck-btn-secondary {
+                ${isMobile ? 'width: 100%' : 'flex: 1'};
+                padding: ${isMobile ? '16px' : '12px 16px'};
+                border: none;
+                border-radius: ${isMobile ? '12px' : '10px'};
+                font-size: var(--duck-font-size);
+                font-weight: 500;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                position: relative;
+                overflow: hidden;
+                min-height: var(--duck-touch-size);
+                touch-action: manipulation;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .duck-btn-primary {
+                background: var(--duck-accent);
+                color: white;
+                box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+            }
+
+            .duck-btn-primary:hover:not(:disabled), .duck-btn-primary:active:not(:disabled) {
+                background: #66bb6a;
+                transform: translateY(-1px);
+                box-shadow: 0 6px 16px rgba(76, 175, 80, 0.4);
+            }
+
+            .duck-btn-primary:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+                transform: none;
+            }
+
+            .duck-btn-secondary {
+                background: rgba(255, 255, 255, 0.1);
+                color: var(--duck-text);
+                border: 1px solid var(--duck-border);
+            }
+
+            .duck-btn-secondary:hover, .duck-btn-secondary:active {
+                background: rgba(255, 255, 255, 0.15);
+            }
+
+            /* Progress bar */
+            .duck-progress-container {
+                margin-bottom: ${isMobile ? '20px' : '16px'};
+            }
+
+            .duck-progress-bar {
+                width: 100%;
+                height: ${isMobile ? '8px' : '6px'};
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: ${isMobile ? '4px' : '3px'};
+                overflow: hidden;
+                margin-bottom: ${isMobile ? '12px' : '8px'};
+            }
+
+            .duck-progress-fill {
+                height: 100%;
+                background: linear-gradient(90deg, var(--duck-accent), #81c784);
+                background-size: 200% 100%;
+                animation: duck-progress 2s linear infinite;
+                transition: width 0.3s ease;
+                width: 0%;
+            }
+
+            .duck-progress-text {
+                font-size: ${isMobile ? '14px' : '12px'};
+                text-align: center;
+                color: rgba(224, 224, 224, 0.8);
+            }
+
+            /* Error display */
+            .duck-error {
+                background: rgba(244, 67, 54, 0.1);
+                border: 1px solid rgba(244, 67, 54, 0.3);
+                border-radius: ${isMobile ? '10px' : '8px'};
+                padding: ${isMobile ? '14px' : '10px'};
+                margin-bottom: ${isMobile ? '14px' : '10px'};
+                font-size: var(--duck-font-size);
+                color: #ff6b6b;
+                display: none;
+                line-height: 1.4;
+            }
+
+            .duck-error:not(:empty) {
+                display: block;
+            }
+
+            /* Result display - Better mobile formatting */
+            .duck-result {
+                background: var(--duck-secondary);
+                border: 1px solid var(--duck-border);
+                border-radius: ${isMobile ? '12px' : '10px'};
+                padding: ${isMobile ? '20px' : '16px'};
+                max-height: ${isMobile ? '300px' : '250px'};
+                overflow-y: auto;
+                font-size: var(--duck-font-size);
+                line-height: 1.6;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .duck-result:empty {
+                display: none;
+            }
+
+            /* History Panel - Mobile optimized */
+            .duck-history-panel {
+                max-height: ${isMobile ? '400px' : '350px'};
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .duck-no-history {
+                text-align: center;
+                color: rgba(224, 224, 224, 0.6);
+                font-style: italic;
+                padding: ${isMobile ? '60px 20px' : '40px 20px'};
+                font-size: var(--duck-font-size);
+            }
+
+            .duck-history-item {
+                background: var(--duck-secondary);
+                border: 1px solid var(--duck-border);
+                border-radius: ${isMobile ? '12px' : '10px'};
+                padding: ${isMobile ? '16px' : '12px'};
+                margin-bottom: ${isMobile ? '16px' : '10px'};
+                cursor: pointer;
+                transition: all 0.2s ease;
+                touch-action: manipulation;
+            }
+
+            .duck-history-item:hover, .duck-history-item:active {
+                background: rgba(255, 255, 255, 0.05);
+                border-color: var(--duck-accent);
+                transform: translateY(-1px);
+            }
+
+            .duck-history-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: ${isMobile ? '10px' : '6px'};
+            }
+
+            .duck-history-date {
+                font-size: ${isMobile ? '12px' : '11px'};
+                color: rgba(224, 224, 224, 0.6);
+            }
+
+            .duck-history-delete {
+                min-width: ${isMobile ? '32px' : '20px'};
+                min-height: ${isMobile ? '32px' : '20px'};
+                border: none;
+                background: rgba(244, 67, 54, 0.2);
+                color: #ff6b6b;
+                border-radius: ${isMobile ? '8px' : '4px'};
+                cursor: pointer;
+                font-size: ${isMobile ? '14px' : '12px'};
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                touch-action: manipulation;
+            }
+
+            .duck-history-delete:hover, .duck-history-delete:active {
+                background: rgba(244, 67, 54, 0.4);
+            }
+
+            .duck-history-desc {
+                font-size: var(--duck-font-size);
+                font-weight: 500;
+                margin-bottom: ${isMobile ? '8px' : '4px'};
+                color: var(--duck-accent);
+                line-height: 1.3;
+            }
+
+            .duck-history-preview {
+                font-size: ${isMobile ? '14px' : '12px'};
+                color: rgba(224, 224, 224, 0.7);
+                line-height: 1.4;
+            }
+
+            /* Settings Panel - Touch optimized */
+            .duck-settings-section {
+                margin-bottom: ${isMobile ? '24px' : '20px'};
+                padding-bottom: ${isMobile ? '20px' : '16px'};
+                border-bottom: 1px solid var(--duck-border);
+            }
+
+            .duck-settings-section:last-child {
+                border-bottom: none;
+                margin-bottom: 0;
+            }
+
+            .duck-settings-section h4 {
+                margin: 0 0 ${isMobile ? '14px' : '10px'} 0;
+                font-size: ${isMobile ? '16px' : '14px'};
+                font-weight: 600;
+                color: var(--duck-accent);
+            }
+
+            .duck-settings-section select,
+            .duck-settings-section input[type="password"] {
+                width: 100%;
+                padding: ${isMobile ? '14px 16px' : '8px 12px'};
+                border: 1px solid var(--duck-border);
+                border-radius: ${isMobile ? '10px' : '8px'};
+                background: var(--duck-secondary);
+                color: var(--duck-text);
+                font-size: var(--duck-font-size);
+                outline: none;
+                transition: border-color 0.2s ease;
+                min-height: var(--duck-touch-size);
+                box-sizing: border-box;
+            }
+
+            .duck-settings-section select:focus,
+            .duck-settings-section input[type="password"]:focus {
+                border-color: var(--duck-accent);
+                box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+            }
+
+            .duck-key-input {
+                margin-bottom: ${isMobile ? '16px' : '10px'};
+            }
+
+            .duck-key-input label {
+                display: block;
+                margin-bottom: ${isMobile ? '8px' : '4px'};
+                font-size: var(--duck-font-size);
+                color: rgba(224, 224, 224, 0.8);
+            }
+
+            /* Checkbox and slider - Touch optimized */
+            .duck-checkbox {
+                display: flex;
+                align-items: center;
+                gap: ${isMobile ? '12px' : '8px'};
+                font-size: var(--duck-font-size);
+                margin-bottom: ${isMobile ? '16px' : '12px'};
+                cursor: pointer;
+                padding: ${isMobile ? '8px 0' : '4px 0'};
+                touch-action: manipulation;
+            }
+
+            .duck-checkbox input[type="checkbox"] {
+                width: ${isMobile ? '20px' : '16px'};
+                height: ${isMobile ? '20px' : '16px'};
+                accent-color: var(--duck-accent);
+                transform: scale(${isMobile ? '1.2' : '1'});
+            }
+
+            .duck-slider {
+                display: block;
+                font-size: var(--duck-font-size);
+                margin-bottom: ${isMobile ? '16px' : '12px'};
+            }
+
+            .duck-slider input[type="range"] {
+                width: 100%;
+                height: ${isMobile ? '8px' : '6px'};
+                margin-top: ${isMobile ? '12px' : '6px'};
+                accent-color: var(--duck-accent);
+                -webkit-appearance: none;
+                appearance: none;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+                outline: none;
+            }
+
+            .duck-slider input[type="range"]::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: ${isMobile ? '24px' : '20px'};
+                height: ${isMobile ? '24px' : '20px'};
+                border-radius: 50%;
+                background: var(--duck-accent);
+                cursor: pointer;
+                border: 2px solid white;
+                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+            }
+
+            .duck-slider input[type="range"]::-moz-range-thumb {
+                width: ${isMobile ? '24px' : '20px'};
+                height: ${isMobile ? '24px' : '20px'};
+                border-radius: 50%;
+                background: var(--duck-accent);
+                cursor: pointer;
+                border: 2px solid white;
+                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+            }
+
+            /* Settings actions */
+            .duck-settings-actions {
+                display: flex;
+                flex-direction: ${isMobile ? 'column' : 'row'};
+                gap: ${isMobile ? '12px' : '10px'};
+                padding-top: ${isMobile ? '20px' : '16px'};
+            }
+
+            /* Minimized Button - Mobile optimized */
+            .duck-minimized {
+                position: fixed;
+                width: ${isMobile ? '100px' : '80px'};
+                height: ${isMobile ? '50px' : '40px'};
+                background: var(--duck-accent);
+                border-radius: ${isMobile ? '25px' : '20px'};
+                display: none;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                box-shadow: var(--duck-shadow);
+                z-index: 999999;
+                transition: all 0.3s ease;
+                animation: duck-fade-in 0.4s ease-out;
+                touch-action: manipulation;
+            }
+
+            .duck-minimized:hover, .duck-minimized:active {
+                transform: scale(1.05);
+                box-shadow: 0 12px 40px rgba(76, 175, 80, 0.4);
+            }
+
+            .duck-minimized-text {
+                color: white;
+                font-weight: 600;
+                font-size: ${isMobile ? '14px' : '12px'};
+                font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+                user-select: none;
+            }
+
+            /* Notifications - Mobile positioned */
+            .duck-notification {
+                position: fixed;
+                top: ${isMobile ? '10px' : '20px'};
+                right: ${isMobile ? '10px' : '20px'};
+                left: ${isMobile ? '10px' : 'auto'};
+                padding: ${isMobile ? '16px' : '12px 16px'};
+                background: var(--duck-primary);
+                border: 1px solid var(--duck-border);
+                border-radius: ${isMobile ? '12px' : '8px'};
+                color: var(--duck-text);
+                font-size: var(--duck-font-size);
+                z-index: 1000000;
+                transform: translateY(${isMobile ? '-100px' : 'translateX(400px)'});
+                opacity: 0;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                box-shadow: var(--duck-shadow);
+                max-width: ${isMobile ? 'calc(100vw - 20px)' : '300px'};
+                word-wrap: break-word;
+            }
+
+            .duck-notification-show {
+                transform: ${isMobile ? 'translateY(0)' : 'translateX(0)'};
+                opacity: 1;
+            }
+
+            .duck-notification-success {
+                border-color: var(--duck-accent);
+                background: rgba(76, 175, 80, 0.1);
+                color: #81c784;
+            }
+
+            .duck-notification-error {
+                border-color: #f44336;
+                background: rgba(244, 67, 54, 0.1);
+                color: #ff6b6b;
+            }
+
+            /* Enhanced Mobile Responsiveness */
+            @media (max-width: 480px) {
+                .duck-main-ui {
+                    position: fixed !important;
+                    left: 10px !important;
+                    right: 10px !important;
+                    top: 10px !important;
+                    width: calc(100vw - 20px) !important;
+                    max-width: none !important;
+                    min-width: none !important;
+                    max-height: calc(100vh - 20px) !important;
+                }
+
+                .duck-content {
+                    max-height: calc(100vh - 200px) !important;
+                }
+
+                .duck-header h2 {
+                    font-size: 14px !important;
+                }
+
+                .duck-control-btn {
+                    min-width: 40px !important;
+                    min-height: 40px !important;
+                    font-size: 14px !important;
+                }
+
+                .duck-minimized {
+                    left: 10px !important;
+                    top: 10px !important;
+                    width: 80px !important;
+                    height: 45px !important;
+                }
+            }
+
+            @media (max-width: 768px) and (orientation: landscape) {
+                .duck-main-ui {
+                    max-height: 90vh !important;
+                }
+                
+                .duck-content {
+                    max-height: calc(90vh - 180px) !important;
+                }
+            }
+
+            /* Tablet specific optimizations */
+            @media (min-width: 481px) and (max-width: 1024px) {
+                .duck-main-ui {
+                    width: min(500px, calc(100vw - 40px)) !important;
+                    left: 20px !important;
+                    top: 20px !important;
+                    max-height: calc(100vh - 40px) !important;
+                }
+
+                .duck-content {
+                    max-height: calc(100vh - 220px) !important;
+                }
+            }
+
+            /* Dark mode improvements for OLED screens */
+            @media (prefers-color-scheme: dark) {
+                :root {
+                    --duck-primary: rgba(8, 8, 8, 0.95);
+                    --duck-secondary: rgba(15, 15, 15, 0.9);
+                }
+            }
+
+            /* High contrast mode support */
+            @media (prefers-contrast: high) {
+                :root {
+                    --duck-border: rgba(255, 255, 255, 0.3);
+                    --duck-accent: #66bb6a;
+                }
+                
+                .duck-control-btn {
+                    border: 1px solid var(--duck-border);
+                }
+            }
+
+            /* Reduced motion support */
+            @media (prefers-reduced-motion: reduce) {
+                * {
+                    animation-duration: 0.01ms !important;
+                    animation-iteration-count: 1 !important;
+                    transition-duration: 0.01ms !important;
+                }
+            }
+
+            /* Focus indicators for accessibility */
+            .duck-control-btn:focus,
+            .duck-tab:focus,
+            .duck-btn-primary:focus,
+            .duck-btn-secondary:focus {
+                outline: 2px solid var(--duck-accent);
+                outline-offset: 2px;
+            }
+
+            /* Loading states */
+            .duck-btn-primary:disabled {
+                position: relative;
+                overflow: hidden;
+            }
+
+            .duck-btn-primary:disabled::after {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: -100%;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+                animation: loading-shimmer 1.5s infinite;
+            }
+
+            @keyframes loading-shimmer {
+                0% { left: -100%; }
+                100% { left: 100%; }
+            }
+
+            /* Improved touch feedback */
+            .duck-control-btn:active,
+            .duck-tab:active,
+            .duck-btn-primary:active:not(:disabled),
+            .duck-btn-secondary:active,
+            .duck-history-item:active,
+            .duck-minimized:active {
+                transform: scale(0.95);
+                transition: transform 0.1s ease;
+            }
+
+            /* Better text selection on mobile */
+            .duck-result {
+                -webkit-user-select: text;
+                -moz-user-select: text;
+                -ms-user-select: text;
+                user-select: text;
+            }
+
+            .duck-header,
+            .duck-tabs,
+            .duck-control-btn,
+            .duck-minimized {
+                -webkit-user-select: none;
+                -moz-user-select: none;
+                -ms-user-select: none;
+                user-select: none;
+            }
+
+            /* Prevent text scaling on iOS */
+            .duck-main-ui,
+            .duck-minimized {
+                -webkit-text-size-adjust: 100%;
+                text-size-adjust: 100%;
+            }
+
+            /* Safe area support for notched devices */
+            @supports (padding: max(0px)) {
+                .duck-main-ui {
+                    padding-left: max(0px, env(safe-area-inset-left));
+                    padding-right: max(0px, env(safe-area-inset-right));
+                }
+                
+                .duck-minimized {
+                    left: max(10px, env(safe-area-inset-left));
+                    top: max(10px, env(safe-area-inset-top));
+                }
+                
+                .duck-notification {
+                    left: max(10px, env(safe-area-inset-left));
+                    right: max(10px, env(safe-area-inset-right));
+                    top: max(10px, env(safe-area-inset-top));
+                }
+            }
+            `;
+        }
+    }
+
+    // Initialize the application
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => new StupidDuckApp());
+    } else {
+        new StupidDuckApp();
+    }
+
+})();
