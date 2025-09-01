@@ -1,0 +1,1871 @@
+// ==UserScript==
+// @name          Stupid Duck01 - Enhanced Neo Glass UI (Touch & Mobile Optimized)
+// @namespace     http://tampermonkey.net/
+// @version       2.2
+// @description   Giao diện kính mờ nâng cao với hỗ trợ touch và tối ưu mobile/tablet 🦆✨
+// @author        Enhanced Touch Version
+// @match         *://*/*
+// @grant         GM_addStyle
+// @grant         GM_setValue
+// @grant         GM_getValue
+// @grant         GM_deleteValue
+// @grant         GM_xmlhttpRequest
+// @require       https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js
+// @connect       generativelanguage.googleapis.com
+// @connect       api.openai.com
+// @connect       api.anthropic.com
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    /* global html2canvas:true */
+
+    // Chỉ chạy trong top-level frame
+    if (window.top !== window.self) return;
+
+    // Touch Device Detection
+    function isTouchDevice() {
+        return 'ontouchstart' in window ||
+               navigator.maxTouchPoints > 0 ||
+               navigator.msMaxTouchPoints > 0;
+    }
+
+    // Device Type Detection
+    function getDeviceType() {
+        const ua = navigator.userAgent;
+        const isMobile = /Android|iPhone|iPod|BlackBerry|Windows Phone/i.test(ua);
+        const isTablet = /iPad|Android.*tablet|Kindle|Silk/i.test(ua) ||
+                        (window.innerWidth >= 768 && window.innerWidth <= 1024);
+
+        if (isMobile && !isTablet) return 'mobile';
+        if (isTablet) return 'tablet';
+        return 'desktop';
+    }
+
+    const DEVICE_TYPE = getDeviceType();
+    const IS_TOUCH = isTouchDevice();
+
+    // Configuration
+    const CONFIG = {
+        API_PROVIDERS: {
+            GEMINI: {
+                name: 'Google Gemini',
+                key: GM_getValue('gemini_key', 'GEMINI_API_KEY'),
+                url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+                model: 'gemini-2.0-flash'
+            },
+            OPENAI: {
+                name: 'OpenAI GPT-4',
+                key: GM_getValue('openai_key', 'OPENAI_API_KEY'),
+                url: 'https://api.openai.com/v1/chat/completions',
+                model: 'gpt-4o-mini'
+            }
+        },
+        THEMES: {
+            DARK: 'dark',
+            CYBERPUNK: 'cyberpunk'
+        },
+        MAX_HISTORY: 50,
+        RETRY_ATTEMPTS: 3,
+        RETRY_DELAY: 2000,
+        RATE_LIMIT_DELAY: 1000,
+        // Touch & Device specific settings
+        TOUCH: {
+            TAP_THRESHOLD: 10, // pixels
+            HOLD_DURATION: 500, // ms
+            SWIPE_THRESHOLD: 50 // pixels
+        }
+    };
+
+    // State Management
+    const state = {
+        currentProvider: GM_getValue('current_provider', 'GEMINI'),
+        currentTheme: GM_getValue('current_theme', CONFIG.THEMES.DARK),
+        history: JSON.parse(GM_getValue('duck_history', '[]')),
+        isProcessing: false,
+        settings: {
+            fontSize: GM_getValue('font_size', DEVICE_TYPE === 'mobile' ? 16 : 14),
+            autoSave: GM_getValue('auto_save', true),
+            soundEnabled: GM_getValue('sound_enabled', false),
+            uiScale: GM_getValue('ui_scale', 100) // Thêm UI scale
+        }
+    };
+
+    // Utility Functions
+    const utils = {
+        delay: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+
+        formatDate: (date) => {
+            return new Intl.DateTimeFormat('vi-VN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            }).format(date);
+        },
+
+        sanitizeHTML: (str) => {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        },
+
+        playNotificationSound: () => {
+            if (!state.settings.soundEnabled) return;
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+            const createTone = (frequency, duration, volume = 0.1) => {
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.frequency.value = frequency;
+                oscillator.type = 'sine';
+
+                gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+                gainNode.gain.linearRampToValueAtTime(volume, audioContext.currentTime + 0.05);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + duration);
+            };
+
+            createTone(523.25, 0.2);
+            setTimeout(() => createTone(659.25, 0.2), 200);
+            setTimeout(() => createTone(783.99, 0.3), 400);
+        },
+
+        saveToHistory: (entry) => {
+            state.history.unshift({
+                id: Date.now(),
+                timestamp: new Date(),
+                ...entry
+            });
+
+            if (state.history.length > CONFIG.MAX_HISTORY) {
+                state.history = state.history.slice(0, CONFIG.MAX_HISTORY);
+            }
+
+            GM_setValue('duck_history', JSON.stringify(state.history));
+        },
+
+        // Touch utilities
+        getEventPosition: (e) => {
+            if (e.touches && e.touches.length > 0) {
+                return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+            return { x: e.clientX, y: e.clientY };
+        },
+
+        calculateDistance: (pos1, pos2) => {
+            const dx = pos1.x - pos2.x;
+            const dy = pos1.y - pos2.y;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+    };
+
+    // API Handlers (unchanged from original)
+    const apiHandlers = {
+        async xmlHttpRequestPromise(config) {
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    ...config,
+                    onload: (response) => {
+                        if (response.status >= 200 && response.status < 300) {
+                            resolve(response);
+                        } else {
+                            reject(new Error(`HTTP ${response.status}: ${response.statusText}\nResponse: ${response.responseText}`));
+                        }
+                    },
+                    onerror: (error) => reject(new Error(`Network error: ${error.error || 'Unknown error'}`)),
+                    ontimeout: () => reject(new Error('Request timeout'))
+                });
+            });
+        },
+
+        async fetchWithRetry(config, retries = CONFIG.RETRY_ATTEMPTS) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await this.xmlHttpRequestPromise(config);
+
+                    if (response.status === 429) {
+                        if (i === retries - 1) throw new Error('Quá nhiều yêu cầu. Vui lòng thử lại sau vài phút.');
+                        const delay = CONFIG.RETRY_DELAY * Math.pow(2, i);
+                        console.log(`Rate limited, retrying in ${delay}ms...`);
+                        await utils.delay(delay);
+                        continue;
+                    }
+
+                    return response;
+                } catch (error) {
+                    console.error(`Attempt ${i + 1} failed:`, error);
+                    if (i === retries - 1) throw error;
+                    await utils.delay(CONFIG.RETRY_DELAY);
+                }
+            }
+        },
+
+        async sendToGemini(imageDataURL, description) {
+            const provider = CONFIG.API_PROVIDERS.GEMINI;
+            if (!provider.key) throw new Error('Chưa cấu hình API key cho Gemini');
+
+            const mimeType = imageDataURL.match(/data:(image\/[^;]+);/)[1];
+            const base64Data = imageDataURL.split(',')[1];
+
+            const body = {
+                contents: [{
+                    parts: [
+                        { text: `Nói tiếng Việt và giúp tôi giải bài tập trong ảnh. Mô tả: ${description || 'Không có mô tả'}` },
+                        { inlineData: { mimeType, data: base64Data } }
+                    ]
+                }]
+            };
+
+            try {
+                const response = await this.fetchWithRetry({
+                    method: 'POST',
+                    url: `${provider.url}?key=${provider.key}`,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    data: JSON.stringify(body),
+                    timeout: 30000
+                });
+
+                const data = JSON.parse(response.responseText);
+                const result = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                if (!result) {
+                    console.error('Gemini response:', data);
+                    throw new Error("Không nhận được phản hồi từ Gemini. Vui lòng kiểm tra API key hoặc thử lại.");
+                }
+                return result;
+            } catch (error) {
+                console.error('Gemini API Error:', error);
+                if (error.message.includes('429')) {
+                    throw new Error('Gemini API bị giới hạn. Vui lòng thử lại sau.');
+                }
+                if (error.message.includes('401') || error.message.includes('403')) {
+                    throw new Error('API key Gemini không hợp lệ. Vui lòng kiểm tra lại.');
+                }
+                throw new Error(`Lỗi Gemini API: ${error.message}`);
+            }
+        },
+
+        async sendToOpenAI(imageDataURL, description) {
+            const provider = CONFIG.API_PROVIDERS.OPENAI;
+            if (!provider.key) throw new Error('Chưa cấu hình API key cho OpenAI');
+
+            if (!provider.key.startsWith('sk-')) {
+                throw new Error('API key OpenAI không đúng định dạng. Key phải bắt đầu bằng "sk-"');
+            }
+
+            const body = {
+                model: provider.model,
+                messages: [{
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: `Nói tiếng Việt và giúp tôi giải bài tập trong ảnh. Mô tả: ${description || 'Không có mô tả'}`
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: imageDataURL,
+                                detail: "high"
+                            }
+                        }
+                    ]
+                }],
+                max_tokens: 1500,
+                temperature: 0.7
+            };
+
+            try {
+                await utils.delay(CONFIG.RATE_LIMIT_DELAY);
+
+                const response = await this.fetchWithRetry({
+                    method: 'POST',
+                    url: provider.url,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${provider.key}`,
+                        'User-Agent': 'StupidDuck/1.0'
+                    },
+                    data: JSON.stringify(body),
+                    timeout: 60000
+                });
+
+                const data = JSON.parse(response.responseText);
+                const result = data.choices?.[0]?.message?.content;
+
+                if (!result) {
+                    console.error('OpenAI response:', data);
+                    if (data.error) {
+                        throw new Error(`OpenAI API Error: ${data.error.message}`);
+                    }
+                    throw new Error("Không nhận được phản hồi từ OpenAI. Vui lòng thử lại.");
+                }
+
+                return result;
+            } catch (error) {
+                console.error('OpenAI API Error:', error);
+
+                if (error.message.includes('429')) {
+                    throw new Error('OpenAI API bị giới hạn tốc độ. Vui lòng chờ một lúc rồi thử lại.');
+                }
+                if (error.message.includes('401')) {
+                    throw new Error('API key OpenAI không hợp lệ hoặc đã hết hạn. Vui lòng kiểm tra lại.');
+                }
+                if (error.message.includes('403')) {
+                    throw new Error('API key OpenAI không có quyền truy cập endpoint này.');
+                }
+                if (error.message.includes('insufficient_quota')) {
+                    throw new Error('Tài khoản OpenAI đã hết quota. Vui lòng nạp thêm credit.');
+                }
+                if (error.message.includes('model_not_found')) {
+                    throw new Error(`Model ${provider.model} không tồn tại hoặc không có quyền truy cập.`);
+                }
+
+                throw new Error(`Lỗi OpenAI API: ${error.message}`);
+            }
+        }
+    };
+
+    // Theme Manager
+    const themeManager = {
+        themes: {
+            [CONFIG.THEMES.DARK]: {
+                primary: 'rgba(18, 18, 18, 0.9)',
+                secondary: 'rgba(30, 30, 30, 0.8)',
+                accent: '#4caf50',
+                text: '#e0e0e0',
+                border: 'rgba(255, 255, 255, 0.1)'
+            },
+            [CONFIG.THEMES.CYBERPUNK]: {
+                primary: 'rgba(0, 15, 25, 0.9)',
+                secondary: 'rgba(0, 25, 40, 0.8)',
+                accent: '#00ffff',
+                text: '#00ff00',
+                border: 'rgba(0, 255, 255, 0.3)'
+            }
+        },
+
+        apply(theme) {
+            const colors = this.themes[theme];
+            if (!colors) return;
+
+            state.currentTheme = theme;
+            GM_setValue('current_theme', theme);
+
+            document.documentElement.style.setProperty('--duck-primary', colors.primary);
+            document.documentElement.style.setProperty('--duck-secondary', colors.secondary);
+            document.documentElement.style.setProperty('--duck-accent', colors.accent);
+            document.documentElement.style.setProperty('--duck-text', colors.text);
+            document.documentElement.style.setProperty('--duck-border', colors.border);
+        }
+    };
+
+    // UI Components
+    const ui = {
+        createElement(tag, className, innerHTML) {
+            const el = document.createElement(tag);
+            if (className) el.className = className;
+            if (innerHTML) el.innerHTML = innerHTML;
+            return el;
+        },
+
+        createProgressBar() {
+            return this.createElement('div', 'duck-progress-container', `
+                <div class="duck-progress-bar">
+                    <div class="duck-progress-fill"></div>
+                </div>
+                <div class="duck-progress-text">Đang xử lý...</div>
+            `);
+        },
+
+        createHistoryPanel() {
+            const panel = this.createElement('div', 'duck-history-panel');
+            this.updateHistoryPanel(panel);
+            return panel;
+        },
+
+        updateHistoryPanel(panel) {
+            if (state.history.length === 0) {
+                panel.innerHTML = '<div class="duck-no-history">Chưa có lịch sử</div>';
+                return;
+            }
+
+            panel.innerHTML = state.history.map(entry => `
+                <div class="duck-history-item" data-id="${entry.id}">
+                    <div class="duck-history-header">
+                        <span class="duck-history-date">${utils.formatDate(new Date(entry.timestamp))}</span>
+                        <button class="duck-history-delete" data-id="${entry.id}">×</button>
+                    </div>
+                    <div class="duck-history-desc">${entry.description || 'Không có mô tả'}</div>
+                    <div class="duck-history-preview">${entry.result.substring(0, 100)}...</div>
+                </div>
+            `).join('');
+
+            panel.querySelectorAll('.duck-history-delete').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = parseInt(btn.dataset.id);
+                    state.history = state.history.filter(item => item.id !== id);
+                    GM_setValue('duck_history', JSON.stringify(state.history));
+                    this.updateHistoryPanel(panel);
+                });
+            });
+
+            panel.querySelectorAll('.duck-history-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const id = parseInt(item.dataset.id);
+                    const entry = state.history.find(h => h.id === id);
+                    if (entry) {
+                        document.getElementById('duck-desc').value = entry.description || '';
+                        document.getElementById('duck-result').innerHTML = entry.result.replace(/\n/g, '<br>');
+                    }
+                });
+            });
+        },
+
+        createSettingsPanel() {
+            return this.createElement('div', 'duck-settings-panel', `
+                <div class="duck-settings-section">
+                    <h4>AI Provider</h4>
+                    <select id="duck-provider-select">
+                        <option value="GEMINI" ${state.currentProvider === 'GEMINI' ? 'selected' : ''}>Google Gemini</option>
+                        <option value="OPENAI" ${state.currentProvider === 'OPENAI' ? 'selected' : ''}>OpenAI GPT-4</option>
+                    </select>
+                </div>
+
+                <div class="duck-settings-section">
+                    <h4>API Keys</h4>
+                    <div class="duck-key-input">
+                        <label>Gemini API Key:</label>
+                        <input type="password" id="duck-gemini-key" value="${CONFIG.API_PROVIDERS.GEMINI.key}" placeholder="Nhập API key">
+                    </div>
+                    <div class="duck-key-input">
+                        <label>OpenAI API Key:</label>
+                        <input type="password" id="duck-openai-key" value="${CONFIG.API_PROVIDERS.OPENAI.key}" placeholder="Nhập API key">
+                    </div>
+                </div>
+
+                <div class="duck-settings-section">
+                    <h4>Giao diện</h4>
+                    <select id="duck-theme-select">
+                        <option value="${CONFIG.THEMES.DARK}" ${state.currentTheme === CONFIG.THEMES.DARK ? 'selected' : ''}>Dark</option>
+                        <option value="${CONFIG.THEMES.CYBERPUNK}" ${state.currentTheme === CONFIG.THEMES.CYBERPUNK ? 'selected' : ''}>Cyberpunk</option>
+                    </select>
+
+                    <label class="duck-slider">
+                        Kích thước UI: <span id="duck-ui-scale-value">${state.settings.uiScale}%</span>
+                        <input type="range" id="duck-ui-scale" min="70" max="150" step="10" value="${state.settings.uiScale}">
+                        <small class="duck-scale-hint">70% (Nhỏ) - 100% (Bình thường) - 150% (To)</small>
+                    </label>
+                </div>
+
+                <div class="duck-settings-section">
+                    <h4>Khác</h4>
+                    <label class="duck-checkbox">
+                        <input type="checkbox" id="duck-sound-toggle" ${state.settings.soundEnabled ? 'checked' : ''}>
+                        Âm thanh thông báo
+                    </label>
+                    <label class="duck-slider">
+                        Font size: <span id="duck-font-size-value">${state.settings.fontSize}px</span>
+                        <input type="range" id="duck-font-size" min="12" max="24" value="${state.settings.fontSize}">
+                    </label>
+                </div>
+
+                <div class="duck-settings-actions">
+                    <button id="duck-save-settings" class="duck-btn-primary">💾 Lưu cài đặt</button>
+                    <button id="duck-reset-settings" class="duck-btn-secondary">🔄 Khôi phục mặc định</button>
+                </div>
+            `);
+        }
+    };
+
+    // Main Application
+    class StupidDuckApp {
+        constructor() {
+            this.initializeIframeBlocker();
+            this.createMainUI();
+            this.attachEventListeners();
+            themeManager.apply(state.currentTheme);
+            this.applyFontSize();
+            this.applyUIScale(); // Áp dụng UI scale
+            this.handleDeviceSpecificSetup();
+        }
+
+        initializeIframeBlocker() {
+            this.iframeBlocker = document.createElement("div");
+            Object.assign(this.iframeBlocker.style, {
+                position: "fixed",
+                top: "0",
+                left: "0",
+                width: "100vw",
+                height: "100vh",
+                zIndex: "999998",
+                cursor: IS_TOUCH ? "grabbing" : "grabbing",
+                display: "none",
+                touchAction: "none"
+            });
+            document.body.appendChild(this.iframeBlocker);
+        }
+
+        handleDeviceSpecificSetup() {
+            // Prevent zoom on double tap for touch devices
+            if (IS_TOUCH) {
+                let lastTouchEnd = 0;
+                document.addEventListener('touchend', function (event) {
+                    const now = (new Date()).getTime();
+                    if (now - lastTouchEnd <= 300) {
+                        event.preventDefault();
+                    }
+                    lastTouchEnd = now;
+                }, false);
+            }
+
+            // Add viewport meta tag for mobile if not present
+            if (DEVICE_TYPE === 'mobile' && !document.querySelector('meta[name="viewport"]')) {
+                const viewport = document.createElement('meta');
+                viewport.name = 'viewport';
+                viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+                document.head.appendChild(viewport);
+            }
+        }
+
+        makeDraggable(element) {
+            let isDragging = false;
+            let startPos = { x: 0, y: 0 };
+            let elementStartPos = { x: 0, y: 0 };
+            let touchStartTime = 0;
+            let touchIdentifier = null;
+
+            // Event handlers for both mouse and touch
+            const handleStart = (e) => {
+                // Only allow dragging from header or minimized button
+                if (!e.target.closest('.duck-draggable') && !element.classList.contains('duck-minimized')) {
+                    return;
+                }
+
+                // For touch, store the identifier of the first touch
+                if (e.touches) {
+                    touchIdentifier = e.touches[0].identifier;
+                    // Don't prevent default here - let scrolling work normally
+                }
+
+                const pos = utils.getEventPosition(e);
+                startPos = pos;
+                elementStartPos = {
+                    x: element.offsetLeft,
+                    y: element.offsetTop
+                };
+
+                isDragging = false;
+                touchStartTime = Date.now();
+
+                element.style.transition = 'none';
+            };
+
+            const handleMove = (e) => {
+                if (touchStartTime === 0) return;
+
+                // For touch events, find the correct touch point
+                if (e.touches && touchIdentifier !== null) {
+                    let correctTouch = null;
+                    for (let i = 0; i < e.touches.length; i++) {
+                        if (e.touches[i].identifier === touchIdentifier) {
+                            correctTouch = e.touches[i];
+                            break;
+                        }
+                    }
+                    if (!correctTouch) return;
+                }
+
+                const pos = utils.getEventPosition(e);
+                const distance = utils.calculateDistance(startPos, pos);
+
+                // Start dragging if moved beyond threshold
+                if (!isDragging && distance > CONFIG.TOUCH.TAP_THRESHOLD) {
+                    isDragging = true;
+                    // Only now prevent default to stop scrolling while dragging
+                    if (e.preventDefault) e.preventDefault();
+                    this.iframeBlocker.style.display = 'block';
+                }
+
+                if (isDragging) {
+                    // Prevent default only when actually dragging
+                    if (e.preventDefault) e.preventDefault();
+
+                    const newX = elementStartPos.x + (pos.x - startPos.x);
+                    const newY = elementStartPos.y + (pos.y - startPos.y);
+
+                    // Keep element within viewport bounds
+                    const maxX = window.innerWidth - element.offsetWidth;
+                    const maxY = window.innerHeight - element.offsetHeight;
+
+                    element.style.left = `${Math.max(0, Math.min(newX, maxX))}px`;
+                    element.style.top = `${Math.max(0, Math.min(newY, maxY))}px`;
+                }
+            };
+
+            const handleEnd = (e) => {
+                if (touchStartTime === 0) return;
+
+                this.iframeBlocker.style.display = 'none';
+                element.style.transition = '';
+
+                // Handle tap/click if not dragged
+                if (!isDragging) {
+                    const touchDuration = Date.now() - touchStartTime;
+
+                    if (element.classList.contains('duck-minimized')) {
+                        if (IS_TOUCH && touchDuration < CONFIG.TOUCH.HOLD_DURATION) {
+                            // Single tap - do nothing, require double tap
+                        } else {
+                            this.restore();
+                        }
+                    }
+                }
+
+                isDragging = false;
+                touchStartTime = 0;
+                touchIdentifier = null;
+            };
+
+            if (IS_TOUCH) {
+                element.addEventListener('touchstart', handleStart, { passive: true });
+                document.addEventListener('touchmove', handleMove, { passive: false });
+                document.addEventListener('touchend', handleEnd, { passive: true });
+            } else {
+                element.addEventListener('mousedown', handleStart);
+                document.addEventListener('mousemove', handleMove);
+                document.addEventListener('mouseup', handleEnd);
+            }
+        }
+
+        createMainUI() {
+            GM_addStyle(this.getEnhancedStyles());
+
+            this.mainUI = ui.createElement('div', 'duck-main-ui');
+            this.mainUI.innerHTML = `
+                <div class="duck-header duck-draggable">
+                    <h2 class="duck-title">🐥 Stupid Duck AI 🐥</h2>
+                    <div class="duck-header-controls">
+                        <button id="duck-settings-btn" class="duck-control-btn" title="Cài đặt">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="3.5"></circle>
+                                <line x1="12" y1="2" x2="12" y2="5"></line>
+                                <line x1="12" y1="19" x2="12" y2="22"></line>
+                                <line x1="2" y1="12" x2="5" y2="12"></line>
+                                <line x1="19" y1="12" x2="22" y2="12"></line>
+                                <line x1="4.5" y1="4.5" x2="6.5" y2="6.5"></line>
+                                <line x1="17.5" y1="17.5" x2="19.5" y2="19.5"></line>
+                                <line x1="4.5" y1="19.5" x2="6.5" y2="17.5"></line>
+                                <line x1="17.5" y1="6.5" x2="19.5" y2="4.5"></line>
+                            </svg>
+                        </button>
+
+                        <button id="duck-history-btn" class="duck-control-btn" title="Lịch sử">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 3v5h5"></path>
+                                <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"></path>
+                                <path d="M12 7v5l4 2"></path>
+                            </svg>
+                        </button>
+
+                        <button id="duck-minimize-btn" class="duck-control-btn" title="Thu nhỏ">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+
+                        <button id="duck-close-btn" class="duck-control-btn duck-close" title="Đóng">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="duck-tabs">
+                    <button class="duck-tab active" data-tab="main">Giải bài</button>
+                    <button class="duck-tab" data-tab="history">Lịch sử</button>
+                    <button class="duck-tab" data-tab="settings">Cài đặt</button>
+                </div>
+
+                <div class="duck-content">
+                    <div class="duck-tab-content active" id="duck-main-tab">
+                        <div class="duck-input-group">
+                            <label>Mô tả bài tập (tùy chọn):</label>
+                            <textarea id="duck-desc" placeholder="Mô tả chi tiết về bài tập cần giải..."></textarea>
+                        </div>
+
+                        <div class="duck-provider-info">
+                            <span>Provider: <strong id="duck-current-provider">${CONFIG.API_PROVIDERS[state.currentProvider].name}</strong></span>
+                        </div>
+
+                        <div class="duck-actions">
+                            <button id="duck-solve-btn" class="duck-btn-primary">
+                                📷 Chụp màn hình & Giải bài
+                            </button>
+                            <button id="duck-clear-btn" class="duck-btn-secondary">🗑️ Xóa kết quả</button>
+                        </div>
+
+                        <div id="duck-progress" style="display: none;"></div>
+                        <div id="duck-error" class="duck-error"></div>
+                        <div id="duck-result" class="duck-result"></div>
+                    </div>
+
+                    <div class="duck-tab-content" id="duck-history-tab"></div>
+                    <div class="duck-tab-content" id="duck-settings-tab"></div>
+                </div>
+            `;
+
+            // Minimized button
+            this.minimizedBtn = ui.createElement('div', 'duck-minimized');
+            this.minimizedBtn.innerHTML = '<span class="duck-minimized-text">🐥</span>';
+            this.minimizedBtn.title = IS_TOUCH ? 'Touch đúp để hiện lại' : 'Double click để hiện lại';
+
+            // Append to body
+            document.body.appendChild(this.mainUI);
+            document.body.appendChild(this.minimizedBtn);
+
+            // Make draggable
+            this.makeDraggable(this.mainUI);
+            this.makeDraggable(this.minimizedBtn);
+
+            // Initialize tab contents
+            this.initializeTabContents();
+        }
+
+initializeTabContents() {
+    const historyTab = this.mainUI.querySelector('#duck-history-tab');
+    historyTab.appendChild(ui.createHistoryPanel());
+
+    const settingsTab = this.mainUI.querySelector('#duck-settings-tab');
+    settingsTab.appendChild(ui.createSettingsPanel());
+
+    const progressContainer = this.mainUI.querySelector('#duck-progress');
+    progressContainer.appendChild(ui.createProgressBar());
+}
+
+attachEventListeners() {
+    // Tab switching with touch support
+    this.mainUI.querySelectorAll('.duck-tab').forEach(tab => {
+        const eventType = IS_TOUCH ? 'touchend' : 'click';
+        tab.addEventListener(
+            eventType,
+            (e) => {
+                if (e.cancelable) e.preventDefault();
+                this.switchTab(tab.dataset.tab);
+            },
+            { passive: false }
+        );
+    });
+
+    // Main actions
+    this.mainUI.querySelector('#duck-solve-btn').addEventListener(
+        IS_TOUCH ? 'touchend' : 'click',
+        (e) => {
+            if (e.cancelable) e.preventDefault();
+            this.handleSolve();
+        },
+        { passive: false }
+    );
+
+    this.mainUI.querySelector('#duck-clear-btn').addEventListener(
+        IS_TOUCH ? 'touchend' : 'click',
+        (e) => {
+            if (e.cancelable) e.preventDefault();
+            this.clearResult();
+        },
+        { passive: false }
+    );
+
+    // Minimize button
+    this.mainUI.querySelector('#duck-minimize-btn').addEventListener(
+        IS_TOUCH ? 'touchend' : 'click',
+        (e) => {
+            if (e.cancelable) e.preventDefault();
+            e.stopPropagation();
+            this.minimize();
+        },
+        { passive: false }
+    );
+
+    // Close button
+    this.mainUI.querySelector('#duck-close-btn').addEventListener(
+        IS_TOUCH ? 'touchend' : 'click',
+        (e) => {
+            if (e.cancelable) e.preventDefault();
+            e.stopPropagation();
+            this.close();
+        },
+        { passive: false }
+    );
+
+    // History button
+    this.mainUI.querySelector('#duck-history-btn').addEventListener(
+        IS_TOUCH ? 'touchend' : 'click',
+        (e) => {
+            if (e.cancelable) e.preventDefault();
+            e.stopPropagation();
+            this.switchTab('history');
+        },
+        { passive: false }
+    );
+
+    // Settings button
+    this.mainUI.querySelector('#duck-settings-btn').addEventListener(
+        IS_TOUCH ? 'touchend' : 'click',
+        (e) => {
+            if (e.cancelable) e.preventDefault();
+            e.stopPropagation();
+            this.switchTab('settings');
+        },
+        { passive: false }
+    );
+
+    // Minimized button with double tap support
+    if (IS_TOUCH) {
+        let lastTap = 0;
+        this.minimizedBtn.addEventListener(
+            'touchend',
+            (e) => {
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+
+                const currentTime = Date.now();
+                const tapLength = currentTime - lastTap;
+
+                if (tapLength < 500 && tapLength > 0) {
+                    this.restore();
+                }
+                lastTap = currentTime;
+            },
+            { passive: false }
+        );
+    } else {
+        this.minimizedBtn.addEventListener('dblclick', (e) => {
+            if (e.cancelable) e.preventDefault();
+            e.stopPropagation();
+            this.restore();
+        });
+    }
+
+    this.attachSettingsListeners();
+}
+
+        attachSettingsListeners() {
+            const settingsPanel = this.mainUI.querySelector('#duck-settings-tab');
+
+            settingsPanel.querySelector('#duck-gemini-key').addEventListener('change', (e) => {
+                CONFIG.API_PROVIDERS.GEMINI.key = e.target.value;
+                GM_setValue('gemini_key', e.target.value);
+            });
+
+            settingsPanel.querySelector('#duck-openai-key').addEventListener('change', (e) => {
+                CONFIG.API_PROVIDERS.OPENAI.key = e.target.value;
+                GM_setValue('openai_key', e.target.value);
+            });
+
+            settingsPanel.querySelector('#duck-provider-select').addEventListener('change', (e) => {
+                state.currentProvider = e.target.value;
+                GM_setValue('current_provider', e.target.value);
+                this.mainUI.querySelector('#duck-current-provider').textContent = CONFIG.API_PROVIDERS[e.target.value].name;
+            });
+
+            settingsPanel.querySelector('#duck-theme-select').addEventListener('change', (e) => {
+                themeManager.apply(e.target.value);
+            });
+
+            const fontSizeSlider = settingsPanel.querySelector('#duck-font-size');
+            const fontSizeValue = settingsPanel.querySelector('#duck-font-size-value');
+
+            fontSizeSlider.addEventListener('input', (e) => {
+                const size = parseInt(e.target.value);
+                fontSizeValue.textContent = size + 'px';
+                state.settings.fontSize = size;
+                this.applyFontSize();
+                GM_setValue('font_size', size);
+            });
+
+            // UI Scale slider
+            const uiScaleSlider = settingsPanel.querySelector('#duck-ui-scale');
+            const uiScaleValue = settingsPanel.querySelector('#duck-ui-scale-value');
+
+            uiScaleSlider.addEventListener('input', (e) => {
+                const scale = parseInt(e.target.value);
+                uiScaleValue.textContent = scale + '%';
+                state.settings.uiScale = scale;
+                this.applyUIScale();
+                GM_setValue('ui_scale', scale);
+            });
+
+            settingsPanel.querySelector('#duck-sound-toggle').addEventListener('change', (e) => {
+                state.settings.soundEnabled = e.target.checked;
+                GM_setValue('sound_enabled', e.target.checked);
+            });
+
+            const eventType = IS_TOUCH ? 'touchend' : 'click';
+
+            settingsPanel.querySelector('#duck-save-settings').addEventListener(eventType, (e) => {
+                e.preventDefault();
+                this.saveAllSettings();
+                this.showNotification('Đã lưu cài đặt thành công!', 'success');
+            });
+
+            settingsPanel.querySelector('#duck-reset-settings').addEventListener(eventType, (e) => {
+                e.preventDefault();
+                if (confirm('Bạn có chắc muốn khôi phục tất cả cài đặt về mặc định?')) {
+                    this.resetSettings();
+                }
+            });
+        }
+
+        applyFontSize() {
+            this.mainUI.style.fontSize = state.settings.fontSize + 'px';
+            document.documentElement.style.setProperty('--duck-font-size', state.settings.fontSize + 'px');
+        }
+
+        applyUIScale() {
+            const scale = state.settings.uiScale / 100;
+            this.mainUI.style.transform = `scale(${scale})`;
+            this.mainUI.style.transformOrigin = 'top left';
+
+            // Adjust position to prevent going off-screen when scaled up
+            const rect = this.mainUI.getBoundingClientRect();
+            const maxX = window.innerWidth - (rect.width * scale);
+            const maxY = window.innerHeight - (rect.height * scale);
+
+            const currentX = parseInt(this.mainUI.style.left) || 0;
+            const currentY = parseInt(this.mainUI.style.top) || 0;
+
+            if (currentX > maxX) this.mainUI.style.left = Math.max(0, maxX) + 'px';
+            if (currentY > maxY) this.mainUI.style.top = Math.max(0, maxY) + 'px';
+
+            // Also scale minimized button
+            this.minimizedBtn.style.transform = `scale(${scale})`;
+            this.minimizedBtn.style.transformOrigin = 'top left';
+        }
+
+        async handleSolve() {
+            if (state.isProcessing) return;
+
+            try {
+                state.isProcessing = true;
+                this.showProgress();
+                this.clearError();
+
+                const currentProvider = CONFIG.API_PROVIDERS[state.currentProvider];
+                if (!currentProvider.key) {
+                    throw new Error(`Chưa cấu hình API key cho ${currentProvider.name}. Vui lòng vào tab Cài đặt để cấu hình.`);
+                }
+
+                this.updateProgress('Đang chụp màn hình...', 20);
+                const canvas = await html2canvas(document.body, {
+                    useCORS: true,
+                    allowTaint: true,
+                    scale: DEVICE_TYPE === 'mobile' ? 0.6 : 0.8
+                });
+                const imageDataURL = canvas.toDataURL("image/png", 0.8);
+
+                this.updateProgress('Đang gửi đến AI...', 60);
+                const description = this.mainUI.querySelector('#duck-desc').value;
+
+                let result;
+                if (state.currentProvider === 'GEMINI') {
+                    result = await apiHandlers.sendToGemini(imageDataURL, description);
+                } else if (state.currentProvider === 'OPENAI') {
+                    result = await apiHandlers.sendToOpenAI(imageDataURL, description);
+                }
+
+                this.updateProgress('Hoàn thành!', 100);
+                await utils.delay(500);
+
+                this.displayResult(result);
+
+                utils.saveToHistory({
+                    description,
+                    result,
+                    provider: state.currentProvider
+                });
+
+                utils.playNotificationSound();
+
+            } catch (error) {
+                this.showError(error.message);
+                console.error('Duck AI Error:', error);
+            } finally {
+                state.isProcessing = false;
+                this.hideProgress();
+            }
+        }
+
+        switchTab(tabName) {
+            this.mainUI.querySelectorAll('.duck-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.tab === tabName);
+            });
+
+            this.mainUI.querySelectorAll('.duck-tab-content').forEach(content => {
+                content.classList.toggle('active', content.id === `duck-${tabName}-tab`);
+            });
+
+            if (tabName === 'history') {
+                const historyPanel = this.mainUI.querySelector('#duck-history-tab .duck-history-panel');
+                if (historyPanel) {
+                    ui.updateHistoryPanel(historyPanel);
+                }
+            }
+        }
+
+        showProgress() {
+            this.mainUI.querySelector('#duck-progress').style.display = 'block';
+            this.mainUI.querySelector('#duck-solve-btn').disabled = true;
+        }
+
+        hideProgress() {
+            this.mainUI.querySelector('#duck-progress').style.display = 'none';
+            this.mainUI.querySelector('#duck-solve-btn').disabled = false;
+        }
+
+        updateProgress(text, percent) {
+            const progressContainer = this.mainUI.querySelector('#duck-progress');
+            const progressText = progressContainer.querySelector('.duck-progress-text');
+            const progressFill = progressContainer.querySelector('.duck-progress-fill');
+
+            if (progressText) progressText.textContent = text;
+            if (progressFill) progressFill.style.width = `${percent}%`;
+        }
+
+        displayResult(result) {
+            const resultContainer = this.mainUI.querySelector('#duck-result');
+            resultContainer.innerHTML = result.replace(/\n/g, '<br>');
+            resultContainer.scrollTop = 0;
+        }
+
+        clearResult() {
+            this.mainUI.querySelector('#duck-result').innerHTML = '';
+            this.mainUI.querySelector('#duck-desc').value = '';
+            this.clearError();
+        }
+
+        showError(message) {
+            const errorContainer = this.mainUI.querySelector('#duck-error');
+            errorContainer.textContent = '❌ ' + message;
+        }
+
+        clearError() {
+            this.mainUI.querySelector('#duck-error').textContent = '';
+        }
+
+        showNotification(message, type = 'info') {
+            const notification = ui.createElement('div', `duck-notification duck-notification-${type}`);
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.classList.add('duck-notification-show');
+            }, 100);
+
+            setTimeout(() => {
+                notification.classList.remove('duck-notification-show');
+                setTimeout(() => document.body.removeChild(notification), 300);
+            }, 3000);
+        }
+
+        minimize() {
+            this.mainUI.style.display = 'none';
+            this.minimizedBtn.style.display = 'flex';
+        }
+
+        restore() {
+            this.mainUI.style.display = 'block';
+            this.minimizedBtn.style.display = 'none';
+        }
+
+        close() {
+            if (confirm('Bạn có chắc muốn đóng Stupid Duck?')) {
+                this.mainUI.style.display = 'none';
+                this.minimizedBtn.style.display = 'none';
+            }
+        }
+
+        saveAllSettings() {
+            Object.keys(state.settings).forEach(key => {
+                GM_setValue(key, state.settings[key]);
+            });
+        }
+
+        resetSettings() {
+            GM_deleteValue('gemini_key');
+            GM_deleteValue('openai_key');
+            GM_deleteValue('current_provider');
+            GM_deleteValue('current_theme');
+            GM_deleteValue('font_size');
+            GM_deleteValue('sound_enabled');
+            GM_deleteValue('auto_save');
+            location.reload();
+        }
+
+        getEnhancedStyles() {
+            return `
+            :root {
+                --duck-primary: rgba(18, 18, 18, 0.9);
+                --duck-secondary: rgba(30, 30, 30, 0.8);
+                --duck-accent: #4caf50;
+                --duck-text: #e0e0e0;
+                --duck-border: rgba(255, 255, 255, 0.1);
+                --duck-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+                --duck-radius: ${DEVICE_TYPE === 'mobile' ? '12px' : '16px'};
+                --duck-font-size: ${state.settings.fontSize}px;
+            }
+
+            /* Prevent text selection on touch devices */
+            ${IS_TOUCH ? `
+            .duck-main-ui *, .duck-minimized * {
+                -webkit-user-select: none;
+                -moz-user-select: none;
+                -ms-user-select: none;
+                user-select: none;
+                -webkit-touch-callout: none;
+                -webkit-tap-highlight-color: transparent;
+            }
+
+            /* Allow text selection in input areas */
+            .duck-input-group textarea,
+            .duck-settings-section input,
+            .duck-settings-section select,
+            .duck-settings-panel,
+            .duck-settings-section {
+                -webkit-user-select: text !important;
+                -moz-user-select: text !important;
+                -ms-user-select: text !important;
+                user-select: text !important;
+            }
+            ` : ''}
+
+            @keyframes duck-fade-in {
+                from { opacity: 0; transform: scale(0.8) translateY(-20px); }
+                to { opacity: 1; transform: scale(1) translateY(0); }
+            }
+
+            @keyframes duck-slide-in {
+                from { transform: translateX(-100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+
+            @keyframes duck-progress {
+                0% { background-position: 0% 50%; }
+                50% { background-position: 100% 50%; }
+                100% { background-position: 0% 50%; }
+            }
+
+            .duck-main-ui {
+                position: fixed;
+                top: ${DEVICE_TYPE === 'mobile' ? '20px' : '80px'};
+                left: ${DEVICE_TYPE === 'mobile' ? '10px' : '80px'};
+                width: ${DEVICE_TYPE === 'mobile' ? 'calc(100vw - 20px)' :
+                        DEVICE_TYPE === 'tablet' ? '450px' : '420px'};
+                max-width: ${DEVICE_TYPE === 'mobile' ? 'none' : '450px'};
+                max-height: ${DEVICE_TYPE === 'mobile' ? 'calc(100vh - 40px)' : '600px'};
+                backdrop-filter: blur(20px);
+                background: var(--duck-primary);
+                border-radius: var(--duck-radius);
+                border: 1px solid var(--duck-border);
+                box-shadow: var(--duck-shadow);
+                z-index: 999999;
+                font-family: 'Segoe UI', -apple-system, sans-serif;
+                font-size: var(--duck-font-size);
+                color: var(--duck-text);
+                animation: duck-fade-in 0.5s ease-out;
+                overflow: hidden;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            .duck-main-ui:hover {
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.9);
+            }
+
+            .duck-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: ${DEVICE_TYPE === 'mobile' ? '12px 16px' : '16px 20px'};
+                background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(0,0,0,0.1));
+                border-bottom: 1px solid var(--duck-border);
+                cursor: move;
+                user-select: none;
+                /* Only apply touch-action: none to header for dragging */
+                ${IS_TOUCH ? 'touch-action: none;' : ''}
+            }
+
+            .duck-header h2 {
+                margin: 0;
+                font-size: ${DEVICE_TYPE === 'mobile' ? '16px' : '18px'};
+                font-weight: 600;
+                background: linear-gradient(45deg, var(--duck-accent), #81c784);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                pointer-events: none;
+            }
+
+            .duck-header-controls {
+                display: flex;
+                gap: ${DEVICE_TYPE === 'mobile' ? '6px' : '8px'};
+            }
+
+            .duck-control-btn {
+                width: ${DEVICE_TYPE === 'mobile' ? '32px' : '28px'};
+                height: ${DEVICE_TYPE === 'mobile' ? '32px' : '28px'};
+                border: none;
+                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.1);
+                color: var(--duck-text);
+                cursor: pointer;
+                font-size: 14px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: all 0.2s ease;
+                z-index: 10;
+                position: relative;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
+            }
+
+            .duck-control-btn:hover,
+            .duck-control-btn:active {
+                background: rgba(255, 255, 255, 0.2);
+                transform: scale(1.1);
+            }
+
+            .duck-control-btn.duck-close {
+                background: rgba(244, 67, 54, 0.8);
+            }
+
+            .duck-control-btn.duck-close:hover,
+            .duck-control-btn.duck-close:active {
+                background: rgba(244, 67, 54, 1);
+            }
+
+            .duck-tabs {
+                display: flex;
+                background: rgba(0, 0, 0, 0.2);
+                border-bottom: 1px solid var(--duck-border);
+            }
+
+            .duck-tab {
+                flex: 1;
+                padding: ${DEVICE_TYPE === 'mobile' ? '14px 12px' : '12px 16px'};
+                border: none;
+                background: transparent;
+                color: rgba(224, 224, 224, 0.7);
+                cursor: pointer;
+                font-size: ${DEVICE_TYPE === 'mobile' ? '14px' : '13px'};
+                font-weight: 500;
+                transition: all 0.2s ease;
+                position: relative;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
+            }
+
+            .duck-tab:hover,
+            .duck-tab:active {
+                color: var(--duck-text);
+                background: rgba(255, 255, 255, 0.05);
+            }
+
+            .duck-tab.active {
+                color: var(--duck-accent);
+                background: rgba(255, 255, 255, 0.1);
+            }
+
+            .duck-tab.active::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 2px;
+                background: var(--duck-accent);
+            }
+
+            .duck-content {
+                max-height: ${DEVICE_TYPE === 'mobile' ? 'calc(100vh - 200px)' : '450px'};
+                overflow-y: auto;
+                scrollbar-width: thin;
+                scrollbar-color: var(--duck-accent) transparent;
+                -webkit-overflow-scrolling: touch;
+                /* Allow normal touch scrolling in content area */
+                touch-action: pan-y;
+            }
+
+            .duck-content::-webkit-scrollbar {
+                width: 6px;
+            }
+
+            .duck-content::-webkit-scrollbar-track {
+                background: transparent;
+            }
+
+            .duck-content::-webkit-scrollbar-thumb {
+                background: var(--duck-accent);
+                border-radius: 3px;
+            }
+
+            .duck-tab-content {
+                display: none;
+                padding: ${DEVICE_TYPE === 'mobile' ? '16px' : '20px'};
+                animation: duck-slide-in 0.3s ease-out;
+            }
+
+            .duck-tab-content.active {
+                display: block;
+            }
+
+            .duck-input-group {
+                margin-bottom: 16px;
+            }
+
+            .duck-input-group label {
+                display: block;
+                margin-bottom: 6px;
+                font-size: ${DEVICE_TYPE === 'mobile' ? '14px' : '13px'};
+                font-weight: 500;
+                color: rgba(224, 224, 224, 0.9);
+            }
+
+            .duck-input-group textarea {
+                width: 100%;
+                height: ${DEVICE_TYPE === 'mobile' ? '100px' : '80px'};
+                padding: ${DEVICE_TYPE === 'mobile' ? '14px' : '12px'};
+                border: 1px solid var(--duck-border);
+                border-radius: 10px;
+                background: var(--duck-secondary) !important;
+                color: var(--duck-text) !important;
+                font-size: var(--duck-font-size);
+                font-family: inherit;
+                resize: vertical;
+                outline: none;
+                transition: all 0.2s ease;
+                box-sizing: border-box;
+                ${IS_TOUCH ? '-webkit-appearance: none;' : ''}
+            }
+
+            .duck-input-group textarea:focus {
+                border-color: var(--duck-accent);
+                box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+            }
+
+            .duck-provider-info {
+                background: rgba(0, 0, 0, 0.3);
+                padding: ${DEVICE_TYPE === 'mobile' ? '10px 14px' : '8px 12px'};
+                border-radius: 8px;
+                margin-bottom: 16px;
+                font-size: calc(var(--duck-font-size) - 2px);
+                text-align: center;
+            }
+
+            .duck-provider-info strong {
+                color: var(--duck-accent);
+            }
+
+            .duck-actions {
+                display: flex;
+                flex-direction: ${DEVICE_TYPE === 'mobile' ? 'column' : 'row'};
+                gap: 10px;
+                margin-bottom: 16px;
+            }
+
+            .duck-btn-primary, .duck-btn-secondary {
+                flex: 1;
+                padding: ${DEVICE_TYPE === 'mobile' ? '16px' : '12px 16px'};
+                border: none;
+                border-radius: 10px;
+                font-size: var(--duck-font-size);
+                font-weight: 500;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                position: relative;
+                overflow: hidden;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
+            }
+
+            .duck-btn-primary {
+                background: var(--duck-accent);
+                color: white;
+                box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+            }
+
+            .duck-btn-primary:hover:not(:disabled),
+            .duck-btn-primary:active:not(:disabled) {
+                background: #66bb6a;
+                transform: translateY(-1px);
+                box-shadow: 0 6px 16px rgba(76, 175, 80, 0.4);
+            }
+
+            .duck-btn-primary:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+                transform: none;
+            }
+
+            .duck-btn-secondary {
+                background: rgba(255, 255, 255, 0.1);
+                color: var(--duck-text);
+                border: 1px solid var(--duck-border);
+            }
+
+            .duck-btn-secondary:hover,
+            .duck-btn-secondary:active {
+                background: rgba(255, 255, 255, 0.15);
+            }
+
+            .duck-progress-container {
+                margin-bottom: 16px;
+            }
+
+            .duck-progress-bar {
+                width: 100%;
+                height: 6px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 3px;
+                overflow: hidden;
+                margin-bottom: 8px;
+            }
+
+            .duck-progress-fill {
+                height: 100%;
+                background: linear-gradient(90deg, var(--duck-accent), #81c784);
+                background-size: 200% 100%;
+                animation: duck-progress 2s linear infinite;
+                transition: width 0.3s ease;
+                width: 0%;
+            }
+
+            .duck-progress-text {
+                font-size: calc(var(--duck-font-size) - 2px);
+                text-align: center;
+                color: rgba(224, 224, 224, 0.8);
+            }
+
+            .duck-error {
+                background: rgba(244, 67, 54, 0.1);
+                border: 1px solid rgba(244, 67, 54, 0.3);
+                border-radius: 8px;
+                padding: 10px;
+                margin-bottom: 10px;
+                font-size: calc(var(--duck-font-size) - 1px);
+                color: #ff6b6b;
+                display: none;
+            }
+
+            .duck-error:not(:empty) {
+                display: block;
+            }
+
+            .duck-result {
+                background: var(--duck-secondary);
+                border: 1px solid var(--duck-border);
+                border-radius: 10px;
+                padding: 16px;
+                max-height: ${DEVICE_TYPE === 'mobile' ? '200px' : '250px'};
+                overflow-y: auto;
+                font-size: var(--duck-font-size);
+                line-height: 1.6;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .duck-result:empty {
+                display: none;
+            }
+
+            /* History Panel */
+            .duck-history-panel {
+                max-height: ${DEVICE_TYPE === 'mobile' ? '300px' : '350px'};
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+                /* Allow normal touch scrolling in history */
+                touch-action: pan-y;
+            }
+
+            .duck-no-history {
+                text-align: center;
+                color: rgba(224, 224, 224, 0.6);
+                font-style: italic;
+                padding: 40px 20px;
+                font-size: var(--duck-font-size);
+            }
+
+            .duck-history-item {
+                background: var(--duck-secondary);
+                border: 1px solid var(--duck-border);
+                border-radius: 10px;
+                padding: ${DEVICE_TYPE === 'mobile' ? '16px' : '12px'};
+                margin-bottom: 10px;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
+            }
+
+            .duck-history-item:hover,
+            .duck-history-item:active {
+                background: rgba(255, 255, 255, 0.05);
+                border-color: var(--duck-accent);
+            }
+
+            .duck-history-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 6px;
+            }
+
+            .duck-history-date {
+                font-size: calc(var(--duck-font-size) - 3px);
+                color: rgba(224, 224, 224, 0.6);
+            }
+
+            .duck-history-delete {
+                width: ${DEVICE_TYPE === 'mobile' ? '28px' : '20px'};
+                height: ${DEVICE_TYPE === 'mobile' ? '28px' : '20px'};
+                border: none;
+                background: rgba(244, 67, 54, 0.2);
+                color: #ff6b6b;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
+            }
+
+            .duck-history-delete:hover,
+            .duck-history-delete:active {
+                background: rgba(244, 67, 54, 0.4);
+            }
+
+            .duck-history-desc {
+                font-size: calc(var(--duck-font-size) - 2px);
+                font-weight: 500;
+                margin-bottom: 4px;
+                color: var(--duck-accent);
+            }
+
+            .duck-history-preview {
+                font-size: calc(var(--duck-font-size) - 3px);
+                color: rgba(224, 224, 224, 0.7);
+                line-height: 1.4;
+            }
+
+            /* Settings Panel */
+            .duck-settings-panel {
+                max-height: ${DEVICE_TYPE === 'mobile' ? '300px' : '350px'};
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+                /* Allow normal touch scrolling in settings */
+                touch-action: pan-y;
+            }
+
+            .duck-settings-section {
+                margin-bottom: 20px;
+                padding-bottom: 16px;
+                border-bottom: 1px solid var(--duck-border);
+                /* Allow text selection in settings */
+                -webkit-user-select: text;
+                -moz-user-select: text;
+                -ms-user-select: text;
+                user-select: text;
+            }
+
+            .duck-settings-section:last-child {
+                border-bottom: none;
+                margin-bottom: 0;
+            }
+
+            .duck-settings-section h4 {
+                margin: 0 0 10px 0;
+                font-size: calc(var(--duck-font-size) + 0px);
+                font-weight: 600;
+                color: var(--duck-accent);
+            }
+
+            .duck-settings-section select,
+            .duck-settings-section input[type="password"] {
+                width: 100%;
+                padding: ${DEVICE_TYPE === 'mobile' ? '12px 14px' : '8px 12px'};
+                border: 1px solid var(--duck-border);
+                border-radius: 8px;
+                background: var(--duck-secondary);
+                color: var(--duck-text);
+                font-size: calc(var(--duck-font-size) - 1px);
+                outline: none;
+                transition: border-color 0.2s ease;
+                ${IS_TOUCH ? '-webkit-appearance: none;' : ''}
+            }
+
+            .duck-settings-section select:focus,
+            .duck-settings-section input[type="password"]:focus {
+                border-color: var(--duck-accent);
+            }
+
+            .duck-key-input {
+                margin-bottom: 10px;
+            }
+
+            .duck-key-input label {
+                display: block;
+                margin-bottom: 4px;
+                font-size: calc(var(--duck-font-size) - 2px);
+                color: rgba(224, 224, 224, 0.8);
+            }
+
+            .duck-checkbox {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: calc(var(--duck-font-size) - 1px);
+                margin-bottom: 12px;
+                cursor: pointer;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
+            }
+
+            .duck-checkbox input[type="checkbox"] {
+                width: ${DEVICE_TYPE === 'mobile' ? '20px' : '16px'};
+                height: ${DEVICE_TYPE === 'mobile' ? '20px' : '16px'};
+                accent-color: var(--duck-accent);
+            }
+
+            .duck-slider {
+                display: block;
+                font-size: calc(var(--duck-font-size) - 1px);
+                margin-bottom: 12px;
+            }
+
+            .duck-slider input[type="range"] {
+                width: 100%;
+                margin-top: 6px;
+                height: ${DEVICE_TYPE === 'mobile' ? '6px' : '4px'};
+                accent-color: var(--duck-accent);
+                ${IS_TOUCH ? '-webkit-appearance: none;' : ''}
+            }
+
+            .duck-scale-hint {
+                display: block;
+                font-size: calc(var(--duck-font-size) - 4px);
+                color: rgba(224, 224, 224, 0.5);
+                margin-top: 4px;
+                font-style: italic;
+            }
+
+            ${IS_TOUCH ? `
+            .duck-slider input[type="range"]::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background: var(--duck-accent);
+                cursor: pointer;
+            }
+
+            .duck-slider input[type="range"]::-moz-range-thumb {
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background: var(--duck-accent);
+                cursor: pointer;
+                border: none;
+            }
+            ` : ''}
+
+            .duck-settings-actions {
+                display: flex;
+                flex-direction: ${DEVICE_TYPE === 'mobile' ? 'column' : 'row'};
+                gap: 10px;
+                padding-top: 16px;
+            }
+
+            /* Minimized Button */
+            .duck-minimized {
+                position: fixed;
+                top: ${DEVICE_TYPE === 'mobile' ? '20px' : '80px'};
+                left: ${DEVICE_TYPE === 'mobile' ? '20px' : '80px'};
+                width: ${DEVICE_TYPE === 'mobile' ? '60px' : '80px'};
+                height: ${DEVICE_TYPE === 'mobile' ? '60px' : '40px'};
+                background: var(--duck-accent);
+                border-radius: ${DEVICE_TYPE === 'mobile' ? '30px' : '20px'};
+                display: none;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                box-shadow: var(--duck-shadow);
+                z-index: 999999;
+                transition: all 0.3s ease;
+                animation: duck-fade-in 0.4s ease-out;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent; touch-action: none;' : ''}
+            }
+
+            .duck-minimized:hover,
+            .duck-minimized:active {
+                transform: scale(1.05);
+                box-shadow: 0 12px 40px rgba(76, 175, 80, 0.4);
+            }
+
+            .duck-minimized-text {
+                color: white;
+                font-weight: 600;
+                font-size: ${DEVICE_TYPE === 'mobile' ? '20px' : '12px'};
+                font-family: 'Segoe UI', -apple-system, sans-serif;
+                user-select: none;
+            }
+
+            /* Notifications */
+            .duck-notification {
+                position: fixed;
+                top: ${DEVICE_TYPE === 'mobile' ? '10px' : '20px'};
+                right: ${DEVICE_TYPE === 'mobile' ? '10px' : '20px'};
+                left: ${DEVICE_TYPE === 'mobile' ? '10px' : 'auto'};
+                max-width: ${DEVICE_TYPE === 'mobile' ? 'none' : '300px'};
+                padding: ${DEVICE_TYPE === 'mobile' ? '16px' : '12px 16px'};
+                background: var(--duck-primary);
+                border: 1px solid var(--duck-border);
+                border-radius: 8px;
+                color: var(--duck-text);
+                font-size: calc(var(--duck-font-size) - 1px);
+                z-index: 1000000;
+                transform: translateX(${DEVICE_TYPE === 'mobile' ? '0' : '400px'});
+                opacity: 0;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                box-shadow: var(--duck-shadow);
+                text-align: ${DEVICE_TYPE === 'mobile' ? 'center' : 'left'};
+            }
+
+            .duck-notification-show {
+                transform: translateX(0);
+                opacity: 1;
+            }
+
+            .duck-notification-success {
+                border-color: var(--duck-accent);
+                background: rgba(76, 175, 80, 0.1);
+                color: #81c784;
+            }
+
+            .duck-notification-error {
+                border-color: #f44336;
+                background: rgba(244, 67, 54, 0.1);
+                color: #ff6b6b;
+            }
+
+            /* Device-specific optimizations */
+            ${DEVICE_TYPE === 'mobile' ? `
+            /* Mobile-specific styles */
+            .duck-main-ui {
+                border-radius: 16px 16px 0 0;
+                bottom: 0;
+                top: auto;
+                left: 0;
+                width: 100vw;
+                max-width: none;
+                max-height: 70vh;
+            }
+
+            .duck-content {
+                max-height: calc(70vh - 120px);
+            }
+
+            .duck-minimized {
+                bottom: 20px;
+                top: auto;
+                right: 20px;
+                left: auto;
+            }
+
+            /* Prevent body scroll when UI is open */
+            body.duck-mobile-open {
+                overflow: hidden;
+                position: fixed;
+                width: 100%;
+                height: 100%;
+            }
+            ` : ''}
+
+            /* Tablet optimizations */
+            ${DEVICE_TYPE === 'tablet' ? `
+            .duck-main-ui {
+                width: 500px;
+                max-height: 80vh;
+            }
+
+            .duck-content {
+                max-height: calc(80vh - 140px);
+            }
+            ` : ''}
+
+            /* High DPI display optimizations */
+            @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+                .duck-main-ui {
+                    border-width: 0.5px;
+                }
+
+                .duck-control-btn svg {
+                    width: ${DEVICE_TYPE === 'mobile' ? '22px' : '18px'};
+                    height: ${DEVICE_TYPE === 'mobile' ? '22px' : '18px'};
+                }
+            }
+
+            /* Landscape mobile optimization */
+            @media screen and (max-height: 500px) and (orientation: landscape) {
+                .duck-main-ui {
+                    max-height: 90vh;
+                    top: 5vh;
+                    bottom: auto;
+                }
+
+                .duck-content {
+                    max-height: calc(90vh - 100px);
+                }
+            }
+
+            /* Dark mode adjustments for better contrast on mobile */
+            @media (prefers-color-scheme: dark) {
+                .duck-main-ui {
+                    backdrop-filter: blur(30px);
+                }
+            }
+
+            /* Reduce motion for users who prefer it */
+            @media (prefers-reduced-motion: reduce) {
+                .duck-main-ui,
+                .duck-minimized,
+                .duck-notification,
+                .duck-tab-content {
+                    animation: none;
+                    transition: none;
+                }
+            }
+            `;
+        }
+    }
+
+    // Initialize the application
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => new StupidDuckApp());
+    } else {
+        new StupidDuckApp();
+    }
+
+})();
