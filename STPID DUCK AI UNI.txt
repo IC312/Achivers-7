@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name          Stupid Duck00 - Mobile Optimized Neo Glass UI
+// @name          Stupid Duck01 - Enhanced Neo Glass UI (Touch & Mobile Optimized)
 // @namespace     http://tampermonkey.net/
-// @version       2.2
-// @description   Giao diện kính mờ nâng cao tối ưu cho mobile/tablet với touch support và responsive design 🦆✨
-// @author        Mobile Enhanced Version
+// @version       1.0
+// @description   Giao diện kính mờ nâng cao với hỗ trợ touch và tối ưu mobile/tablet 🦆✨
+// @author        Enhanced Touch Version
 // @match         *://*/*
 // @grant         GM_addStyle
 // @grant         GM_setValue
@@ -24,10 +24,27 @@
     // Chỉ chạy trong top-level frame
     if (window.top !== window.self) return;
 
-    // Device detection
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const isTablet = /(iPad|tablet|(android(?!.*mobile))|(windows(?!.*phone)(.*touch))|kindle|playbook|silk|(puffin(?!.*(IP|AP|WP))))/i.test(navigator.userAgent);
-    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    // Touch Device Detection
+    function isTouchDevice() {
+        return 'ontouchstart' in window ||
+               navigator.maxTouchPoints > 0 ||
+               navigator.msMaxTouchPoints > 0;
+    }
+
+    // Device Type Detection
+    function getDeviceType() {
+        const ua = navigator.userAgent;
+        const isMobile = /Android|iPhone|iPod|BlackBerry|Windows Phone/i.test(ua);
+        const isTablet = /iPad|Android.*tablet|Kindle|Silk/i.test(ua) ||
+                        (window.innerWidth >= 768 && window.innerWidth <= 1024);
+
+        if (isMobile && !isTablet) return 'mobile';
+        if (isTablet) return 'tablet';
+        return 'desktop';
+    }
+
+    const DEVICE_TYPE = getDeviceType();
+    const IS_TOUCH = isTouchDevice();
 
     // Configuration
     const CONFIG = {
@@ -47,18 +64,17 @@
         },
         THEMES: {
             DARK: 'dark',
-            LIGHT: 'light',
             CYBERPUNK: 'cyberpunk'
         },
         MAX_HISTORY: 50,
         RETRY_ATTEMPTS: 3,
         RETRY_DELAY: 2000,
         RATE_LIMIT_DELAY: 1000,
-        // Mobile-specific config
-        MOBILE: {
-            MIN_DRAG_DISTANCE: 10, // Minimum distance to start drag
-            TOUCH_TIMEOUT: 300,    // Time to distinguish tap vs drag
-            VIEWPORT_MARGIN: 20    // Margin from screen edges
+        // Touch & Device specific settings
+        TOUCH: {
+            TAP_THRESHOLD: 10, // pixels
+            HOLD_DURATION: 500, // ms
+            SWIPE_THRESHOLD: 50 // pixels
         }
     };
 
@@ -69,17 +85,9 @@
         history: JSON.parse(GM_getValue('duck_history', '[]')),
         isProcessing: false,
         settings: {
-            fontSize: GM_getValue('font_size', isMobile ? 16 : 14),
+            fontSize: GM_getValue('font_size', DEVICE_TYPE === 'mobile' ? 16 : 14),
             autoSave: GM_getValue('auto_save', true),
             soundEnabled: GM_getValue('sound_enabled', false)
-        },
-        // Touch/drag state
-        dragState: {
-            isDragging: false,
-            startX: 0,
-            startY: 0,
-            startTime: 0,
-            element: null
         }
     };
 
@@ -101,29 +109,6 @@
             const div = document.createElement('div');
             div.textContent = str;
             return div.innerHTML;
-        },
-
-        // Get touch position from event
-        getTouchPos: (e) => {
-            const touch = e.touches ? e.touches[0] : e;
-            return {
-                x: touch.clientX,
-                y: touch.clientY
-            };
-        },
-
-        // Check if position is within viewport bounds
-        constrainToViewport: (element, x, y) => {
-            const rect = element.getBoundingClientRect();
-            const margin = CONFIG.MOBILE.VIEWPORT_MARGIN;
-            
-            const maxX = window.innerWidth - rect.width - margin;
-            const maxY = window.innerHeight - rect.height - margin;
-            
-            return {
-                x: Math.max(margin, Math.min(x, maxX)),
-                y: Math.max(margin, Math.min(y, maxY))
-            };
         },
 
         playNotificationSound: () => {
@@ -165,6 +150,20 @@
             }
 
             GM_setValue('duck_history', JSON.stringify(state.history));
+        },
+
+        // Touch utilities
+        getEventPosition: (e) => {
+            if (e.touches && e.touches.length > 0) {
+                return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+            return { x: e.clientX, y: e.clientY };
+        },
+
+        calculateDistance: (pos1, pos2) => {
+            const dx = pos1.x - pos2.x;
+            const dy = pos1.y - pos2.y;
+            return Math.sqrt(dx * dx + dy * dy);
         }
     };
 
@@ -302,8 +301,6 @@
                 });
 
                 const data = JSON.parse(response.responseText);
-                console.log('OpenAI Response:', data);
-
                 const result = data.choices?.[0]?.message?.content;
 
                 if (!result) {
@@ -339,7 +336,7 @@
         }
     };
 
-    // Theme Manager (unchanged)
+    // Theme Manager
     const themeManager = {
         themes: {
             [CONFIG.THEMES.DARK]: {
@@ -348,13 +345,6 @@
                 accent: '#4caf50',
                 text: '#e0e0e0',
                 border: 'rgba(255, 255, 255, 0.1)'
-            },
-            [CONFIG.THEMES.LIGHT]: {
-                primary: 'rgba(255, 255, 255, 0.9)',
-                secondary: 'rgba(240, 240, 240, 0.8)',
-                accent: '#2196f3',
-                text: '#333333',
-                border: 'rgba(0, 0, 0, 0.1)'
             },
             [CONFIG.THEMES.CYBERPUNK]: {
                 primary: 'rgba(0, 15, 25, 0.9)',
@@ -380,7 +370,7 @@
         }
     };
 
-    // Enhanced UI Components for Mobile
+    // UI Components
     const ui = {
         createElement(tag, className, innerHTML) {
             const el = document.createElement(tag);
@@ -421,7 +411,6 @@
                 </div>
             `).join('');
 
-            // Add event listeners with touch support
             panel.querySelectorAll('.duck-history-delete').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -470,7 +459,6 @@
                     <h4>Giao diện</h4>
                     <select id="duck-theme-select">
                         <option value="${CONFIG.THEMES.DARK}" ${state.currentTheme === CONFIG.THEMES.DARK ? 'selected' : ''}>Dark</option>
-                        <option value="${CONFIG.THEMES.LIGHT}" ${state.currentTheme === CONFIG.THEMES.LIGHT ? 'selected' : ''}>Light</option>
                         <option value="${CONFIG.THEMES.CYBERPUNK}" ${state.currentTheme === CONFIG.THEMES.CYBERPUNK ? 'selected' : ''}>Cyberpunk</option>
                     </select>
                 </div>
@@ -495,9 +483,18 @@
         }
     };
 
-    // Enhanced Mobile Drag Handler
-    class MobileDragHandler {
+    // Main Application
+    class StupidDuckApp {
         constructor() {
+            this.initializeIframeBlocker();
+            this.createMainUI();
+            this.attachEventListeners();
+            themeManager.apply(state.currentTheme);
+            this.applyFontSize();
+            this.handleDeviceSpecificSetup();
+        }
+
+        initializeIframeBlocker() {
             this.iframeBlocker = document.createElement("div");
             Object.assign(this.iframeBlocker.style, {
                 position: "fixed",
@@ -506,164 +503,191 @@
                 width: "100vw",
                 height: "100vh",
                 zIndex: "999998",
-                cursor: "grabbing",
+                cursor: IS_TOUCH ? "grabbing" : "grabbing",
                 display: "none",
                 touchAction: "none"
             });
             document.body.appendChild(this.iframeBlocker);
         }
 
-        makeDraggable(element) {
-            let dragState = {
-                isDragging: false,
-                startX: 0,
-                startY: 0,
-                startTime: 0,
-                elementStartX: 0,
-                elementStartY: 0
-            };
+        handleDeviceSpecificSetup() {
+            // Prevent zoom on double tap for touch devices
+            if (IS_TOUCH) {
+                let lastTouchEnd = 0;
+                document.addEventListener('touchend', function (event) {
+                    const now = (new Date()).getTime();
+                    if (now - lastTouchEnd <= 300) {
+                        event.preventDefault();
+                    }
+                    lastTouchEnd = now;
+                }, false);
+            }
 
-            // Touch start handler
+            // Add viewport meta tag for mobile if not present
+            if (DEVICE_TYPE === 'mobile' && !document.querySelector('meta[name="viewport"]')) {
+                const viewport = document.createElement('meta');
+                viewport.name = 'viewport';
+                viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+                document.head.appendChild(viewport);
+            }
+        }
+
+        makeDraggable(element) {
+            let isDragging = false;
+            let startPos = { x: 0, y: 0 };
+            let elementStartPos = { x: 0, y: 0 };
+            let touchStartTime = 0;
+            let touchIdentifier = null;
+
+            // Event handlers for both mouse and touch
             const handleStart = (e) => {
-                const target = e.target;
-                
-                // Only allow dragging from header or when minimized
-                if (!target.closest('.duck-draggable') && !element.classList.contains('duck-minimized')) {
+                // Only allow dragging from header or minimized button
+                if (!e.target.closest('.duck-draggable') && !element.classList.contains('duck-minimized')) {
                     return;
                 }
 
-                const pos = utils.getTouchPos(e);
-                const rect = element.getBoundingClientRect();
-                
-                dragState = {
-                    isDragging: false,
-                    startX: pos.x,
-                    startY: pos.y,
-                    startTime: Date.now(),
-                    elementStartX: rect.left,
-                    elementStartY: rect.top
+                // For touch, store the identifier of the first touch
+                if (e.touches) {
+                    touchIdentifier = e.touches[0].identifier;
+                    // Don't prevent default here - let scrolling work normally
+                }
+
+                const pos = utils.getEventPosition(e);
+                startPos = pos;
+                elementStartPos = {
+                    x: element.offsetLeft,
+                    y: element.offsetTop
                 };
 
-                e.preventDefault();
+                isDragging = false;
+                touchStartTime = Date.now();
+
                 element.style.transition = 'none';
-                this.iframeBlocker.style.display = 'block';
             };
 
-            // Touch move handler
             const handleMove = (e) => {
-                if (!this.iframeBlocker.style.display || this.iframeBlocker.style.display === 'none') return;
+                if (touchStartTime === 0) return;
 
-                const pos = utils.getTouchPos(e);
-                const deltaX = pos.x - dragState.startX;
-                const deltaY = pos.y - dragState.startY;
-                const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-
-                // Start dragging if moved enough distance
-                if (!dragState.isDragging && distance > CONFIG.MOBILE.MIN_DRAG_DISTANCE) {
-                    dragState.isDragging = true;
-                    element.classList.add('duck-dragging');
+                // For touch events, find the correct touch point
+                if (e.touches && touchIdentifier !== null) {
+                    let correctTouch = null;
+                    for (let i = 0; i < e.touches.length; i++) {
+                        if (e.touches[i].identifier === touchIdentifier) {
+                            correctTouch = e.touches[i];
+                            break;
+                        }
+                    }
+                    if (!correctTouch) return;
                 }
 
-                if (dragState.isDragging) {
-                    const newX = dragState.elementStartX + deltaX;
-                    const newY = dragState.elementStartY + deltaY;
-                    
-                    const constrained = utils.constrainToViewport(element, newX, newY);
-                    
-                    element.style.left = `${constrained.x}px`;
-                    element.style.top = `${constrained.y}px`;
-                    
-                    e.preventDefault();
+                const pos = utils.getEventPosition(e);
+                const distance = utils.calculateDistance(startPos, pos);
+
+                // Start dragging if moved beyond threshold
+                if (!isDragging && distance > CONFIG.TOUCH.TAP_THRESHOLD) {
+                    isDragging = true;
+                    // Only now prevent default to stop scrolling while dragging
+                    if (e.preventDefault) e.preventDefault();
+                    this.iframeBlocker.style.display = 'block';
+                }
+
+                if (isDragging) {
+                    // Prevent default only when actually dragging
+                    if (e.preventDefault) e.preventDefault();
+
+                    const newX = elementStartPos.x + (pos.x - startPos.x);
+                    const newY = elementStartPos.y + (pos.y - startPos.y);
+
+                    // Keep element within viewport bounds
+                    const maxX = window.innerWidth - element.offsetWidth;
+                    const maxY = window.innerHeight - element.offsetHeight;
+
+                    element.style.left = `${Math.max(0, Math.min(newX, maxX))}px`;
+                    element.style.top = `${Math.max(0, Math.min(newY, maxY))}px`;
                 }
             };
 
-            // Touch end handler
             const handleEnd = (e) => {
-                if (this.iframeBlocker.style.display === 'none') return;
-
-                const timeDiff = Date.now() - dragState.startTime;
-                
-                // If it was a quick tap (not drag), treat as click
-                if (!dragState.isDragging && timeDiff < CONFIG.MOBILE.TOUCH_TIMEOUT) {
-                    if (element.classList.contains('duck-minimized')) {
-                        // Restore from minimized state
-                        element.dispatchEvent(new CustomEvent('duckRestore'));
-                    }
-                }
+                if (touchStartTime === 0) return;
 
                 this.iframeBlocker.style.display = 'none';
                 element.style.transition = '';
-                element.classList.remove('duck-dragging');
-                
-                dragState.isDragging = false;
+
+                // Handle tap/click if not dragged
+                if (!isDragging) {
+                    const touchDuration = Date.now() - touchStartTime;
+
+                    if (element.classList.contains('duck-minimized')) {
+                        if (IS_TOUCH && touchDuration < CONFIG.TOUCH.HOLD_DURATION) {
+                            // Single tap - do nothing, require double tap
+                        } else {
+                            this.restore();
+                        }
+                    }
+                }
+
+                isDragging = false;
+                touchStartTime = 0;
+                touchIdentifier = null;
             };
 
-            // Add both mouse and touch listeners
-            if (isTouchDevice) {
-                element.addEventListener('touchstart', handleStart, { passive: false });
+            if (IS_TOUCH) {
+                element.addEventListener('touchstart', handleStart, { passive: true });
                 document.addEventListener('touchmove', handleMove, { passive: false });
-                document.addEventListener('touchend', handleEnd);
-                document.addEventListener('touchcancel', handleEnd);
+                document.addEventListener('touchend', handleEnd, { passive: true });
             } else {
                 element.addEventListener('mousedown', handleStart);
                 document.addEventListener('mousemove', handleMove);
                 document.addEventListener('mouseup', handleEnd);
             }
         }
-    }
-
-    // Main Application Enhanced for Mobile
-    class StupidDuckApp {
-        constructor() {
-            this.dragHandler = new MobileDragHandler();
-            this.createMainUI();
-            this.attachEventListeners();
-            this.positionForDevice();
-            themeManager.apply(state.currentTheme);
-            this.applyFontSize();
-        }
-
-        positionForDevice() {
-            // Position UI based on device type
-            const margin = CONFIG.MOBILE.VIEWPORT_MARGIN;
-            
-            if (isMobile) {
-                // On mobile, center horizontally and position near top
-                this.mainUI.style.left = `${margin}px`;
-                this.mainUI.style.top = `${margin + 20}px`;
-                this.mainUI.style.right = `${margin}px`;
-                this.mainUI.style.width = `calc(100vw - ${margin * 2}px)`;
-            } else if (isTablet) {
-                // On tablet, use more space but keep manageable
-                this.mainUI.style.left = `${margin * 2}px`;
-                this.mainUI.style.top = `${margin * 2}px`;
-                this.mainUI.style.width = `min(500px, calc(100vw - ${margin * 4}px))`;
-            } else {
-                // Desktop - original positioning
-                this.mainUI.style.left = '80px';
-                this.mainUI.style.top = '80px';
-                this.mainUI.style.width = '420px';
-            }
-
-            // Position minimized button
-            this.minimizedBtn.style.left = `${margin}px`;
-            this.minimizedBtn.style.top = `${margin}px`;
-        }
 
         createMainUI() {
-            // Add mobile-optimized styles
-            GM_addStyle(this.getMobileOptimizedStyles());
+            GM_addStyle(this.getEnhancedStyles());
 
-            // Main UI container
             this.mainUI = ui.createElement('div', 'duck-main-ui');
             this.mainUI.innerHTML = `
                 <div class="duck-header duck-draggable">
-                    <h2>🦆 Stupid Duck AI 🦆</h2>
+                    <h2 class="duck-title">🐥 Stupid Duck AI 🐥</h2>
                     <div class="duck-header-controls">
-                        <button id="duck-settings-btn" class="duck-control-btn" title="Cài đặt">⚙️</button>
-                        <button id="duck-history-btn" class="duck-control-btn" title="Lịch sử">📋</button>
-                        <button id="duck-minimize-btn" class="duck-control-btn" title="Thu nhỏ">➖</button>
-                        <button id="duck-close-btn" class="duck-control-btn duck-close" title="Đóng">✕</button>
+                        <button id="duck-settings-btn" class="duck-control-btn" title="Cài đặt">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="3.5"></circle>
+                                <line x1="12" y1="2" x2="12" y2="5"></line>
+                                <line x1="12" y1="19" x2="12" y2="22"></line>
+                                <line x1="2" y1="12" x2="5" y2="12"></line>
+                                <line x1="19" y1="12" x2="22" y2="12"></line>
+                                <line x1="4.5" y1="4.5" x2="6.5" y2="6.5"></line>
+                                <line x1="17.5" y1="17.5" x2="19.5" y2="19.5"></line>
+                                <line x1="4.5" y1="19.5" x2="6.5" y2="17.5"></line>
+                                <line x1="17.5" y1="6.5" x2="19.5" y2="4.5"></line>
+                            </svg>
+                        </button>
+
+                        <button id="duck-history-btn" class="duck-control-btn" title="Lịch sử">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 3v5h5"></path>
+                                <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"></path>
+                                <path d="M12 7v5l4 2"></path>
+                            </svg>
+                        </button>
+
+                        <button id="duck-minimize-btn" class="duck-control-btn" title="Thu nhỏ">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+
+                        <button id="duck-close-btn" class="duck-control-btn duck-close" title="Đóng">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
                     </div>
                 </div>
 
@@ -701,97 +725,112 @@
                 </div>
             `;
 
-            // Minimized button - enhanced for mobile
+            // Minimized button
             this.minimizedBtn = ui.createElement('div', 'duck-minimized');
-            this.minimizedBtn.innerHTML = '<span class="duck-minimized-text">Duck</span>';
-            this.minimizedBtn.title = 'Hiện lại Stupid Duck';
+            this.minimizedBtn.innerHTML = '<span class="duck-minimized-text">🐥</span>';
+            this.minimizedBtn.title = IS_TOUCH ? 'Touch đúp để hiện lại' : 'Double click để hiện lại';
 
             // Append to body
             document.body.appendChild(this.mainUI);
             document.body.appendChild(this.minimizedBtn);
 
-            // Make draggable with mobile support
-            this.dragHandler.makeDraggable(this.mainUI);
-            this.dragHandler.makeDraggable(this.minimizedBtn);
+            // Make draggable
+            this.makeDraggable(this.mainUI);
+            this.makeDraggable(this.minimizedBtn);
 
             // Initialize tab contents
             this.initializeTabContents();
-
-            // Add custom restore event listener
-            this.minimizedBtn.addEventListener('duckRestore', () => {
-                this.restore();
-            });
         }
 
         initializeTabContents() {
-            // History tab
             const historyTab = this.mainUI.querySelector('#duck-history-tab');
             const historyPanel = ui.createHistoryPanel();
             historyTab.appendChild(historyPanel);
 
-            // Settings tab
             const settingsTab = this.mainUI.querySelector('#duck-settings-tab');
             const settingsPanel = ui.createSettingsPanel();
             settingsTab.appendChild(settingsPanel);
 
-            // Progress bar
             const progressContainer = this.mainUI.querySelector('#duck-progress');
             const progressBar = ui.createProgressBar();
             progressContainer.appendChild(progressBar);
         }
 
         attachEventListeners() {
-            // Tab switching with touch-friendly interaction
+            // Tab switching with touch support
             this.mainUI.querySelectorAll('.duck-tab').forEach(tab => {
-                const handler = () => this.switchTab(tab.dataset.tab);
-                tab.addEventListener('click', handler);
-                if (isTouchDevice) {
-                    tab.addEventListener('touchend', (e) => {
-                        e.preventDefault();
-                        handler();
-                    });
-                }
+                const eventType = IS_TOUCH ? 'touchend' : 'click';
+                tab.addEventListener(eventType, (e) => {
+                    e.preventDefault();
+                    this.switchTab(tab.dataset.tab);
+                });
             });
 
             // Main actions
-            this.mainUI.querySelector('#duck-solve-btn').addEventListener('click', () => this.handleSolve());
-            this.mainUI.querySelector('#duck-clear-btn').addEventListener('click', () => this.clearResult());
+            this.mainUI.querySelector('#duck-solve-btn').addEventListener(IS_TOUCH ? 'touchend' : 'click', (e) => {
+                e.preventDefault();
+                this.handleSolve();
+            });
 
-            // Header controls with improved touch handling
-            this.attachHeaderControls();
+            this.mainUI.querySelector('#duck-clear-btn').addEventListener(IS_TOUCH ? 'touchend' : 'click', (e) => {
+                e.preventDefault();
+                this.clearResult();
+            });
 
-            // Settings with mobile optimization
-            this.attachSettingsListeners();
-        }
+            // Header controls
+            this.mainUI.querySelector('#duck-minimize-btn').addEventListener(IS_TOUCH ? 'touchend' : 'click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.minimize();
+            });
 
-        attachHeaderControls() {
-            const addControlListener = (selector, handler) => {
-                const btn = this.mainUI.querySelector(selector);
-                btn.addEventListener('click', (e) => {
+            this.mainUI.querySelector('#duck-close-btn').addEventListener(IS_TOUCH ? 'touchend' : 'click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.close();
+            });
+
+            this.mainUI.querySelector('#duck-history-btn').addEventListener(IS_TOUCH ? 'touchend' : 'click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.switchTab('history');
+            });
+
+            this.mainUI.querySelector('#duck-settings-btn').addEventListener(IS_TOUCH ? 'touchend' : 'click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.switchTab('settings');
+            });
+
+            // Minimized button with double tap support
+            if (IS_TOUCH) {
+                let lastTap = 0;
+                this.minimizedBtn.addEventListener('touchend', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    handler();
-                });
-                
-                if (isTouchDevice) {
-                    btn.addEventListener('touchend', (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handler();
-                    });
-                }
-            };
 
-            addControlListener('#duck-minimize-btn', () => this.minimize());
-            addControlListener('#duck-close-btn', () => this.close());
-            addControlListener('#duck-history-btn', () => this.switchTab('history'));
-            addControlListener('#duck-settings-btn', () => this.switchTab('settings'));
+                    const currentTime = new Date().getTime();
+                    const tapLength = currentTime - lastTap;
+
+                    if (tapLength < 500 && tapLength > 0) {
+                        this.restore();
+                    }
+                    lastTap = currentTime;
+                });
+            } else {
+                this.minimizedBtn.addEventListener('dblclick', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.restore();
+                });
+            }
+
+            this.attachSettingsListeners();
         }
 
         attachSettingsListeners() {
             const settingsPanel = this.mainUI.querySelector('#duck-settings-tab');
 
-            // API Keys
             settingsPanel.querySelector('#duck-gemini-key').addEventListener('change', (e) => {
                 CONFIG.API_PROVIDERS.GEMINI.key = e.target.value;
                 GM_setValue('gemini_key', e.target.value);
@@ -802,19 +841,16 @@
                 GM_setValue('openai_key', e.target.value);
             });
 
-            // Provider selection
             settingsPanel.querySelector('#duck-provider-select').addEventListener('change', (e) => {
                 state.currentProvider = e.target.value;
                 GM_setValue('current_provider', e.target.value);
                 this.mainUI.querySelector('#duck-current-provider').textContent = CONFIG.API_PROVIDERS[e.target.value].name;
             });
 
-            // Theme selection
             settingsPanel.querySelector('#duck-theme-select').addEventListener('change', (e) => {
                 themeManager.apply(e.target.value);
             });
 
-            // Font size slider
             const fontSizeSlider = settingsPanel.querySelector('#duck-font-size');
             const fontSizeValue = settingsPanel.querySelector('#duck-font-size-value');
 
@@ -826,20 +862,21 @@
                 GM_setValue('font_size', size);
             });
 
-            // Sound toggle
             settingsPanel.querySelector('#duck-sound-toggle').addEventListener('change', (e) => {
                 state.settings.soundEnabled = e.target.checked;
                 GM_setValue('sound_enabled', e.target.checked);
             });
 
-            // Save settings
-            settingsPanel.querySelector('#duck-save-settings').addEventListener('click', () => {
+            const eventType = IS_TOUCH ? 'touchend' : 'click';
+
+            settingsPanel.querySelector('#duck-save-settings').addEventListener(eventType, (e) => {
+                e.preventDefault();
                 this.saveAllSettings();
                 this.showNotification('Đã lưu cài đặt thành công!', 'success');
             });
 
-            // Reset settings
-            settingsPanel.querySelector('#duck-reset-settings').addEventListener('click', () => {
+            settingsPanel.querySelector('#duck-reset-settings').addEventListener(eventType, (e) => {
+                e.preventDefault();
                 if (confirm('Bạn có chắc muốn khôi phục tất cả cài đặt về mặc định?')) {
                     this.resetSettings();
                 }
@@ -864,18 +901,14 @@
                     throw new Error(`Chưa cấu hình API key cho ${currentProvider.name}. Vui lòng vào tab Cài đặt để cấu hình.`);
                 }
 
-                // Take screenshot with mobile optimization
                 this.updateProgress('Đang chụp màn hình...', 20);
                 const canvas = await html2canvas(document.body, {
                     useCORS: true,
                     allowTaint: true,
-                    scale: isMobile ? 0.6 : 0.8, // Lower scale for mobile to reduce memory usage
-                    backgroundColor: null,
-                    logging: false // Disable logging on mobile
+                    scale: DEVICE_TYPE === 'mobile' ? 0.6 : 0.8
                 });
-                const imageDataURL = canvas.toDataURL("image/png", isMobile ? 0.7 : 0.8);
+                const imageDataURL = canvas.toDataURL("image/png", 0.8);
 
-                // Send to AI
                 this.updateProgress('Đang gửi đến AI...', 60);
                 const description = this.mainUI.querySelector('#duck-desc').value;
 
@@ -889,10 +922,8 @@
                 this.updateProgress('Hoàn thành!', 100);
                 await utils.delay(500);
 
-                // Display result
                 this.displayResult(result);
 
-                // Save to history
                 utils.saveToHistory({
                     description,
                     result,
@@ -960,7 +991,7 @@
 
         showError(message) {
             const errorContainer = this.mainUI.querySelector('#duck-error');
-            errorContainer.textContent = '⚠ ' + message;
+            errorContainer.textContent = '❌ ' + message;
         }
 
         clearError() {
@@ -1013,39 +1044,53 @@
             GM_deleteValue('font_size');
             GM_deleteValue('sound_enabled');
             GM_deleteValue('auto_save');
-
             location.reload();
         }
 
-        getMobileOptimizedStyles() {
+        getEnhancedStyles() {
             return `
             :root {
-                --duck-primary: rgba(18, 18, 18, 0.95);
-                --duck-secondary: rgba(30, 30, 30, 0.9);
+                --duck-primary: rgba(18, 18, 18, 0.9);
+                --duck-secondary: rgba(30, 30, 30, 0.8);
                 --duck-accent: #4caf50;
                 --duck-text: #e0e0e0;
                 --duck-border: rgba(255, 255, 255, 0.1);
                 --duck-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
-                --duck-radius: ${isMobile ? '12px' : '16px'};
+                --duck-radius: ${DEVICE_TYPE === 'mobile' ? '12px' : '16px'};
                 --duck-font-size: ${state.settings.fontSize}px;
-                --duck-touch-size: ${isMobile ? '48px' : '32px'};
-                --duck-spacing: ${isMobile ? '16px' : '20px'};
             }
 
-            /* Improved animations for mobile */
+            /* Prevent text selection on touch devices */
+            ${IS_TOUCH ? `
+            .duck-main-ui *, .duck-minimized * {
+                -webkit-user-select: none;
+                -moz-user-select: none;
+                -ms-user-select: none;
+                user-select: none;
+                -webkit-touch-callout: none;
+                -webkit-tap-highlight-color: transparent;
+            }
+
+            /* Allow text selection in input areas */
+            .duck-input-group textarea,
+            .duck-settings-section input,
+            .duck-settings-section select,
+            .duck-settings-panel,
+            .duck-settings-section {
+                -webkit-user-select: text !important;
+                -moz-user-select: text !important;
+                -ms-user-select: text !important;
+                user-select: text !important;
+            }
+            ` : ''}
+
             @keyframes duck-fade-in {
-                from { 
-                    opacity: 0; 
-                    transform: scale(0.9) translateY(-10px); 
-                }
-                to { 
-                    opacity: 1; 
-                    transform: scale(1) translateY(0); 
-                }
+                from { opacity: 0; transform: scale(0.8) translateY(-20px); }
+                to { opacity: 1; transform: scale(1) translateY(0); }
             }
 
             @keyframes duck-slide-in {
-                from { transform: translateX(-50%); opacity: 0; }
+                from { transform: translateX(-100%); opacity: 0; }
                 to { transform: translateX(0); opacity: 1; }
             }
 
@@ -1055,130 +1100,116 @@
                 100% { background-position: 0% 50%; }
             }
 
-            /* Main UI - Mobile Optimized */
             .duck-main-ui {
                 position: fixed;
+                top: ${DEVICE_TYPE === 'mobile' ? '20px' : '80px'};
+                left: ${DEVICE_TYPE === 'mobile' ? '10px' : '80px'};
+                width: ${DEVICE_TYPE === 'mobile' ? 'calc(100vw - 20px)' :
+                        DEVICE_TYPE === 'tablet' ? '450px' : '420px'};
+                max-width: ${DEVICE_TYPE === 'mobile' ? 'none' : '450px'};
+                max-height: ${DEVICE_TYPE === 'mobile' ? 'calc(100vh - 40px)' : '600px'};
                 backdrop-filter: blur(20px);
                 background: var(--duck-primary);
                 border-radius: var(--duck-radius);
                 border: 1px solid var(--duck-border);
                 box-shadow: var(--duck-shadow);
                 z-index: 999999;
-                font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+                font-family: 'Segoe UI', -apple-system, sans-serif;
                 font-size: var(--duck-font-size);
                 color: var(--duck-text);
-                animation: duck-fade-in 0.4s ease-out;
+                animation: duck-fade-in 0.5s ease-out;
                 overflow: hidden;
                 transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                max-height: ${isMobile ? '85vh' : '600px'};
-                max-width: ${isMobile ? '95vw' : '420px'};
-                min-width: ${isMobile ? '280px' : '380px'};
             }
 
             .duck-main-ui:hover {
                 box-shadow: 0 12px 40px rgba(0, 0, 0, 0.9);
             }
 
-            .duck-main-ui.duck-dragging {
-                opacity: 0.8;
-                transform: scale(1.02);
-                box-shadow: 0 15px 45px rgba(0, 0, 0, 0.9);
-            }
-
-            /* Header - Touch Optimized */
             .duck-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                padding: var(--duck-spacing);
+                padding: ${DEVICE_TYPE === 'mobile' ? '12px 16px' : '16px 20px'};
                 background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(0,0,0,0.1));
                 border-bottom: 1px solid var(--duck-border);
                 cursor: move;
                 user-select: none;
-                min-height: var(--duck-touch-size);
-                touch-action: none;
+                /* Only apply touch-action: none to header for dragging */
+                ${IS_TOUCH ? 'touch-action: none;' : ''}
             }
 
             .duck-header h2 {
                 margin: 0;
-                font-size: ${isMobile ? '16px' : '18px'};
+                font-size: ${DEVICE_TYPE === 'mobile' ? '16px' : '18px'};
                 font-weight: 600;
                 background: linear-gradient(45deg, var(--duck-accent), #81c784);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
                 pointer-events: none;
-                line-height: 1.2;
             }
 
-            /* Control buttons - Touch friendly */
             .duck-header-controls {
                 display: flex;
-                gap: ${isMobile ? '12px' : '8px'};
+                gap: ${DEVICE_TYPE === 'mobile' ? '6px' : '8px'};
             }
 
             .duck-control-btn {
-                min-width: var(--duck-touch-size);
-                min-height: var(--duck-touch-size);
+                width: ${DEVICE_TYPE === 'mobile' ? '32px' : '28px'};
+                height: ${DEVICE_TYPE === 'mobile' ? '32px' : '28px'};
                 border: none;
-                border-radius: ${isMobile ? '8px' : '6px'};
+                border-radius: 6px;
                 background: rgba(255, 255, 255, 0.1);
                 color: var(--duck-text);
                 cursor: pointer;
-                font-size: ${isMobile ? '16px' : '14px'};
+                font-size: 14px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 transition: all 0.2s ease;
                 z-index: 10;
                 position: relative;
-                touch-action: manipulation;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
             }
 
-            .duck-control-btn:hover, .duck-control-btn:active {
+            .duck-control-btn:hover,
+            .duck-control-btn:active {
                 background: rgba(255, 255, 255, 0.2);
-                transform: scale(1.05);
+                transform: scale(1.1);
             }
 
             .duck-control-btn.duck-close {
                 background: rgba(244, 67, 54, 0.8);
             }
 
-            .duck-control-btn.duck-close:hover, .duck-control-btn.duck-close:active {
+            .duck-control-btn.duck-close:hover,
+            .duck-control-btn.duck-close:active {
                 background: rgba(244, 67, 54, 1);
             }
 
-            /* Tabs - Mobile friendly */
             .duck-tabs {
                 display: flex;
                 background: rgba(0, 0, 0, 0.2);
                 border-bottom: 1px solid var(--duck-border);
-                overflow-x: auto;
-                scrollbar-width: none;
-                -ms-overflow-style: none;
-            }
-
-            .duck-tabs::-webkit-scrollbar {
-                display: none;
             }
 
             .duck-tab {
                 flex: 1;
-                padding: ${isMobile ? '14px 12px' : '12px 16px'};
+                padding: ${DEVICE_TYPE === 'mobile' ? '14px 12px' : '12px 16px'};
                 border: none;
                 background: transparent;
                 color: rgba(224, 224, 224, 0.7);
                 cursor: pointer;
-                font-size: ${isMobile ? '14px' : '13px'};
+                font-size: ${DEVICE_TYPE === 'mobile' ? '14px' : '13px'};
                 font-weight: 500;
                 transition: all 0.2s ease;
                 position: relative;
-                min-width: ${isMobile ? '80px' : '60px'};
-                white-space: nowrap;
-                touch-action: manipulation;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
             }
 
-            .duck-tab:hover, .duck-tab:active {
+            .duck-tab:hover,
+            .duck-tab:active {
                 color: var(--duck-text);
                 background: rgba(255, 255, 255, 0.05);
             }
@@ -1198,17 +1229,18 @@
                 background: var(--duck-accent);
             }
 
-            /* Content area with improved scrolling */
             .duck-content {
-                max-height: ${isMobile ? '70vh' : '450px'};
+                max-height: ${DEVICE_TYPE === 'mobile' ? 'calc(100vh - 200px)' : '450px'};
                 overflow-y: auto;
                 scrollbar-width: thin;
                 scrollbar-color: var(--duck-accent) transparent;
                 -webkit-overflow-scrolling: touch;
+                /* Allow normal touch scrolling in content area */
+                touch-action: pan-y;
             }
 
             .duck-content::-webkit-scrollbar {
-                width: ${isMobile ? '8px' : '6px'};
+                width: 6px;
             }
 
             .duck-content::-webkit-scrollbar-track {
@@ -1217,13 +1249,12 @@
 
             .duck-content::-webkit-scrollbar-thumb {
                 background: var(--duck-accent);
-                border-radius: ${isMobile ? '4px' : '3px'};
-                min-height: 30px;
+                border-radius: 3px;
             }
 
             .duck-tab-content {
                 display: none;
-                padding: var(--duck-spacing);
+                padding: ${DEVICE_TYPE === 'mobile' ? '16px' : '20px'};
                 animation: duck-slide-in 0.3s ease-out;
             }
 
@@ -1231,25 +1262,24 @@
                 display: block;
             }
 
-            /* Form elements - Touch optimized */
             .duck-input-group {
-                margin-bottom: ${isMobile ? '20px' : '16px'};
+                margin-bottom: 16px;
             }
 
             .duck-input-group label {
                 display: block;
-                margin-bottom: 8px;
-                font-size: ${isMobile ? '14px' : '13px'};
+                margin-bottom: 6px;
+                font-size: ${DEVICE_TYPE === 'mobile' ? '14px' : '13px'};
                 font-weight: 500;
                 color: rgba(224, 224, 224, 0.9);
             }
 
             .duck-input-group textarea {
                 width: 100%;
-                height: ${isMobile ? '100px' : '80px'};
-                padding: ${isMobile ? '16px' : '12px'};
+                height: ${DEVICE_TYPE === 'mobile' ? '100px' : '80px'};
+                padding: ${DEVICE_TYPE === 'mobile' ? '14px' : '12px'};
                 border: 1px solid var(--duck-border);
-                border-radius: ${isMobile ? '12px' : '10px'};
+                border-radius: 10px;
                 background: var(--duck-secondary) !important;
                 color: var(--duck-text) !important;
                 font-size: var(--duck-font-size);
@@ -1258,7 +1288,7 @@
                 outline: none;
                 transition: all 0.2s ease;
                 box-sizing: border-box;
-                touch-action: manipulation;
+                ${IS_TOUCH ? '-webkit-appearance: none;' : ''}
             }
 
             .duck-input-group textarea:focus {
@@ -1266,13 +1296,12 @@
                 box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
             }
 
-            /* Provider info */
             .duck-provider-info {
                 background: rgba(0, 0, 0, 0.3);
-                padding: ${isMobile ? '12px' : '8px 12px'};
-                border-radius: ${isMobile ? '10px' : '8px'};
-                margin-bottom: ${isMobile ? '20px' : '16px'};
-                font-size: ${isMobile ? '14px' : '12px'};
+                padding: ${DEVICE_TYPE === 'mobile' ? '10px 14px' : '8px 12px'};
+                border-radius: 8px;
+                margin-bottom: 16px;
+                font-size: calc(var(--duck-font-size) - 2px);
                 text-align: center;
             }
 
@@ -1280,30 +1309,25 @@
                 color: var(--duck-accent);
             }
 
-            /* Action buttons - Mobile friendly */
             .duck-actions {
                 display: flex;
-                flex-direction: ${isMobile ? 'column' : 'row'};
-                gap: ${isMobile ? '12px' : '10px'};
-                margin-bottom: ${isMobile ? '20px' : '16px'};
+                flex-direction: ${DEVICE_TYPE === 'mobile' ? 'column' : 'row'};
+                gap: 10px;
+                margin-bottom: 16px;
             }
 
             .duck-btn-primary, .duck-btn-secondary {
-                ${isMobile ? 'width: 100%' : 'flex: 1'};
-                padding: ${isMobile ? '16px' : '12px 16px'};
+                flex: 1;
+                padding: ${DEVICE_TYPE === 'mobile' ? '16px' : '12px 16px'};
                 border: none;
-                border-radius: ${isMobile ? '12px' : '10px'};
+                border-radius: 10px;
                 font-size: var(--duck-font-size);
                 font-weight: 500;
                 cursor: pointer;
                 transition: all 0.2s ease;
                 position: relative;
                 overflow: hidden;
-                min-height: var(--duck-touch-size);
-                touch-action: manipulation;
-                display: flex;
-                align-items: center;
-                justify-content: center;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
             }
 
             .duck-btn-primary {
@@ -1312,7 +1336,8 @@
                 box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
             }
 
-            .duck-btn-primary:hover:not(:disabled), .duck-btn-primary:active:not(:disabled) {
+            .duck-btn-primary:hover:not(:disabled),
+            .duck-btn-primary:active:not(:disabled) {
                 background: #66bb6a;
                 transform: translateY(-1px);
                 box-shadow: 0 6px 16px rgba(76, 175, 80, 0.4);
@@ -1330,22 +1355,22 @@
                 border: 1px solid var(--duck-border);
             }
 
-            .duck-btn-secondary:hover, .duck-btn-secondary:active {
+            .duck-btn-secondary:hover,
+            .duck-btn-secondary:active {
                 background: rgba(255, 255, 255, 0.15);
             }
 
-            /* Progress bar */
             .duck-progress-container {
-                margin-bottom: ${isMobile ? '20px' : '16px'};
+                margin-bottom: 16px;
             }
 
             .duck-progress-bar {
                 width: 100%;
-                height: ${isMobile ? '8px' : '6px'};
+                height: 6px;
                 background: rgba(255, 255, 255, 0.1);
-                border-radius: ${isMobile ? '4px' : '3px'};
+                border-radius: 3px;
                 overflow: hidden;
-                margin-bottom: ${isMobile ? '12px' : '8px'};
+                margin-bottom: 8px;
             }
 
             .duck-progress-fill {
@@ -1358,35 +1383,32 @@
             }
 
             .duck-progress-text {
-                font-size: ${isMobile ? '14px' : '12px'};
+                font-size: calc(var(--duck-font-size) - 2px);
                 text-align: center;
                 color: rgba(224, 224, 224, 0.8);
             }
 
-            /* Error display */
             .duck-error {
                 background: rgba(244, 67, 54, 0.1);
                 border: 1px solid rgba(244, 67, 54, 0.3);
-                border-radius: ${isMobile ? '10px' : '8px'};
-                padding: ${isMobile ? '14px' : '10px'};
-                margin-bottom: ${isMobile ? '14px' : '10px'};
-                font-size: var(--duck-font-size);
+                border-radius: 8px;
+                padding: 10px;
+                margin-bottom: 10px;
+                font-size: calc(var(--duck-font-size) - 1px);
                 color: #ff6b6b;
                 display: none;
-                line-height: 1.4;
             }
 
             .duck-error:not(:empty) {
                 display: block;
             }
 
-            /* Result display - Better mobile formatting */
             .duck-result {
                 background: var(--duck-secondary);
                 border: 1px solid var(--duck-border);
-                border-radius: ${isMobile ? '12px' : '10px'};
-                padding: ${isMobile ? '20px' : '16px'};
-                max-height: ${isMobile ? '300px' : '250px'};
+                border-radius: 10px;
+                padding: 16px;
+                max-height: ${DEVICE_TYPE === 'mobile' ? '200px' : '250px'};
                 overflow-y: auto;
                 font-size: var(--duck-font-size);
                 line-height: 1.6;
@@ -1399,88 +1421,100 @@
                 display: none;
             }
 
-            /* History Panel - Mobile optimized */
+            /* History Panel */
             .duck-history-panel {
-                max-height: ${isMobile ? '400px' : '350px'};
+                max-height: ${DEVICE_TYPE === 'mobile' ? '300px' : '350px'};
                 overflow-y: auto;
                 -webkit-overflow-scrolling: touch;
+                /* Allow normal touch scrolling in history */
+                touch-action: pan-y;
             }
 
             .duck-no-history {
                 text-align: center;
                 color: rgba(224, 224, 224, 0.6);
                 font-style: italic;
-                padding: ${isMobile ? '60px 20px' : '40px 20px'};
+                padding: 40px 20px;
                 font-size: var(--duck-font-size);
             }
 
             .duck-history-item {
                 background: var(--duck-secondary);
                 border: 1px solid var(--duck-border);
-                border-radius: ${isMobile ? '12px' : '10px'};
-                padding: ${isMobile ? '16px' : '12px'};
-                margin-bottom: ${isMobile ? '16px' : '10px'};
+                border-radius: 10px;
+                padding: ${DEVICE_TYPE === 'mobile' ? '16px' : '12px'};
+                margin-bottom: 10px;
                 cursor: pointer;
                 transition: all 0.2s ease;
-                touch-action: manipulation;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
             }
 
-            .duck-history-item:hover, .duck-history-item:active {
+            .duck-history-item:hover,
+            .duck-history-item:active {
                 background: rgba(255, 255, 255, 0.05);
                 border-color: var(--duck-accent);
-                transform: translateY(-1px);
             }
 
             .duck-history-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                margin-bottom: ${isMobile ? '10px' : '6px'};
+                margin-bottom: 6px;
             }
 
             .duck-history-date {
-                font-size: ${isMobile ? '12px' : '11px'};
+                font-size: calc(var(--duck-font-size) - 3px);
                 color: rgba(224, 224, 224, 0.6);
             }
 
             .duck-history-delete {
-                min-width: ${isMobile ? '32px' : '20px'};
-                min-height: ${isMobile ? '32px' : '20px'};
+                width: ${DEVICE_TYPE === 'mobile' ? '28px' : '20px'};
+                height: ${DEVICE_TYPE === 'mobile' ? '28px' : '20px'};
                 border: none;
                 background: rgba(244, 67, 54, 0.2);
                 color: #ff6b6b;
-                border-radius: ${isMobile ? '8px' : '4px'};
+                border-radius: 4px;
                 cursor: pointer;
-                font-size: ${isMobile ? '14px' : '12px'};
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                touch-action: manipulation;
+                font-size: 12px;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
             }
 
-            .duck-history-delete:hover, .duck-history-delete:active {
+            .duck-history-delete:hover,
+            .duck-history-delete:active {
                 background: rgba(244, 67, 54, 0.4);
             }
 
             .duck-history-desc {
-                font-size: var(--duck-font-size);
+                font-size: calc(var(--duck-font-size) - 2px);
                 font-weight: 500;
-                margin-bottom: ${isMobile ? '8px' : '4px'};
+                margin-bottom: 4px;
                 color: var(--duck-accent);
-                line-height: 1.3;
             }
 
             .duck-history-preview {
-                font-size: ${isMobile ? '14px' : '12px'};
+                font-size: calc(var(--duck-font-size) - 3px);
                 color: rgba(224, 224, 224, 0.7);
                 line-height: 1.4;
             }
 
-            /* Settings Panel - Touch optimized */
+            /* Settings Panel */
+            .duck-settings-panel {
+                max-height: ${DEVICE_TYPE === 'mobile' ? '300px' : '350px'};
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+                /* Allow normal touch scrolling in settings */
+                touch-action: pan-y;
+            }
+
             .duck-settings-section {
-                margin-bottom: ${isMobile ? '24px' : '20px'};
-                padding-bottom: ${isMobile ? '20px' : '16px'};
+                margin-bottom: 20px;
+                padding-bottom: 16px;
                 border-bottom: 1px solid var(--duck-border);
+                /* Allow text selection in settings */
+                -webkit-user-select: text;
+                -moz-user-select: text;
+                -ms-user-select: text;
+                user-select: text;
             }
 
             .duck-settings-section:last-child {
@@ -1489,8 +1523,8 @@
             }
 
             .duck-settings-section h4 {
-                margin: 0 0 ${isMobile ? '14px' : '10px'} 0;
-                font-size: ${isMobile ? '16px' : '14px'};
+                margin: 0 0 10px 0;
+                font-size: calc(var(--duck-font-size) + 0px);
                 font-weight: 600;
                 color: var(--duck-accent);
             }
@@ -1498,109 +1532,100 @@
             .duck-settings-section select,
             .duck-settings-section input[type="password"] {
                 width: 100%;
-                padding: ${isMobile ? '14px 16px' : '8px 12px'};
+                padding: ${DEVICE_TYPE === 'mobile' ? '12px 14px' : '8px 12px'};
                 border: 1px solid var(--duck-border);
-                border-radius: ${isMobile ? '10px' : '8px'};
+                border-radius: 8px;
                 background: var(--duck-secondary);
                 color: var(--duck-text);
-                font-size: var(--duck-font-size);
+                font-size: calc(var(--duck-font-size) - 1px);
                 outline: none;
                 transition: border-color 0.2s ease;
-                min-height: var(--duck-touch-size);
-                box-sizing: border-box;
+                ${IS_TOUCH ? '-webkit-appearance: none;' : ''}
             }
 
             .duck-settings-section select:focus,
             .duck-settings-section input[type="password"]:focus {
                 border-color: var(--duck-accent);
-                box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
             }
 
             .duck-key-input {
-                margin-bottom: ${isMobile ? '16px' : '10px'};
+                margin-bottom: 10px;
             }
 
             .duck-key-input label {
                 display: block;
-                margin-bottom: ${isMobile ? '8px' : '4px'};
-                font-size: var(--duck-font-size);
+                margin-bottom: 4px;
+                font-size: calc(var(--duck-font-size) - 2px);
                 color: rgba(224, 224, 224, 0.8);
             }
 
-            /* Checkbox and slider - Touch optimized */
             .duck-checkbox {
                 display: flex;
                 align-items: center;
-                gap: ${isMobile ? '12px' : '8px'};
-                font-size: var(--duck-font-size);
-                margin-bottom: ${isMobile ? '16px' : '12px'};
+                gap: 8px;
+                font-size: calc(var(--duck-font-size) - 1px);
+                margin-bottom: 12px;
                 cursor: pointer;
-                padding: ${isMobile ? '8px 0' : '4px 0'};
-                touch-action: manipulation;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent;' : ''}
             }
 
             .duck-checkbox input[type="checkbox"] {
-                width: ${isMobile ? '20px' : '16px'};
-                height: ${isMobile ? '20px' : '16px'};
+                width: ${DEVICE_TYPE === 'mobile' ? '20px' : '16px'};
+                height: ${DEVICE_TYPE === 'mobile' ? '20px' : '16px'};
                 accent-color: var(--duck-accent);
-                transform: scale(${isMobile ? '1.2' : '1'});
             }
 
             .duck-slider {
                 display: block;
-                font-size: var(--duck-font-size);
-                margin-bottom: ${isMobile ? '16px' : '12px'};
+                font-size: calc(var(--duck-font-size) - 1px);
+                margin-bottom: 12px;
             }
 
             .duck-slider input[type="range"] {
                 width: 100%;
-                height: ${isMobile ? '8px' : '6px'};
-                margin-top: ${isMobile ? '12px' : '6px'};
+                margin-top: 6px;
+                height: ${DEVICE_TYPE === 'mobile' ? '6px' : '4px'};
                 accent-color: var(--duck-accent);
-                -webkit-appearance: none;
-                appearance: none;
-                background: rgba(255, 255, 255, 0.1);
-                border-radius: 4px;
-                outline: none;
+                ${IS_TOUCH ? '-webkit-appearance: none;' : ''}
             }
 
+            ${IS_TOUCH ? `
             .duck-slider input[type="range"]::-webkit-slider-thumb {
                 -webkit-appearance: none;
                 appearance: none;
-                width: ${isMobile ? '24px' : '20px'};
-                height: ${isMobile ? '24px' : '20px'};
+                width: 20px;
+                height: 20px;
                 border-radius: 50%;
                 background: var(--duck-accent);
                 cursor: pointer;
-                border: 2px solid white;
-                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
             }
 
             .duck-slider input[type="range"]::-moz-range-thumb {
-                width: ${isMobile ? '24px' : '20px'};
-                height: ${isMobile ? '24px' : '20px'};
+                width: 20px;
+                height: 20px;
                 border-radius: 50%;
                 background: var(--duck-accent);
                 cursor: pointer;
-                border: 2px solid white;
-                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+                border: none;
             }
+            ` : ''}
 
-            /* Settings actions */
             .duck-settings-actions {
                 display: flex;
-                flex-direction: ${isMobile ? 'column' : 'row'};
-                gap: ${isMobile ? '12px' : '10px'};
-                padding-top: ${isMobile ? '20px' : '16px'};
+                flex-direction: ${DEVICE_TYPE === 'mobile' ? 'column' : 'row'};
+                gap: 10px;
+                padding-top: 16px;
             }
 
-            /* Minimized Button - Mobile optimized */
+            /* Minimized Button */
             .duck-minimized {
                 position: fixed;
-                width: ${isMobile ? '100px' : '80px'};
-                height: ${isMobile ? '50px' : '40px'};
+                top: ${DEVICE_TYPE === 'mobile' ? '20px' : '80px'};
+                left: ${DEVICE_TYPE === 'mobile' ? '20px' : '80px'};
+                width: ${DEVICE_TYPE === 'mobile' ? '60px' : '80px'};
+                height: ${DEVICE_TYPE === 'mobile' ? '60px' : '40px'};
                 background: var(--duck-accent);
-                border-radius: ${isMobile ? '25px' : '20px'};
+                border-radius: ${DEVICE_TYPE === 'mobile' ? '30px' : '20px'};
                 display: none;
                 align-items: center;
                 justify-content: center;
@@ -1609,10 +1634,11 @@
                 z-index: 999999;
                 transition: all 0.3s ease;
                 animation: duck-fade-in 0.4s ease-out;
-                touch-action: manipulation;
+                ${IS_TOUCH ? '-webkit-tap-highlight-color: transparent; touch-action: none;' : ''}
             }
 
-            .duck-minimized:hover, .duck-minimized:active {
+            .duck-minimized:hover,
+            .duck-minimized:active {
                 transform: scale(1.05);
                 box-shadow: 0 12px 40px rgba(76, 175, 80, 0.4);
             }
@@ -1620,34 +1646,34 @@
             .duck-minimized-text {
                 color: white;
                 font-weight: 600;
-                font-size: ${isMobile ? '14px' : '12px'};
-                font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+                font-size: ${DEVICE_TYPE === 'mobile' ? '20px' : '12px'};
+                font-family: 'Segoe UI', -apple-system, sans-serif;
                 user-select: none;
             }
 
-            /* Notifications - Mobile positioned */
+            /* Notifications */
             .duck-notification {
                 position: fixed;
-                top: ${isMobile ? '10px' : '20px'};
-                right: ${isMobile ? '10px' : '20px'};
-                left: ${isMobile ? '10px' : 'auto'};
-                padding: ${isMobile ? '16px' : '12px 16px'};
+                top: ${DEVICE_TYPE === 'mobile' ? '10px' : '20px'};
+                right: ${DEVICE_TYPE === 'mobile' ? '10px' : '20px'};
+                left: ${DEVICE_TYPE === 'mobile' ? '10px' : 'auto'};
+                max-width: ${DEVICE_TYPE === 'mobile' ? 'none' : '300px'};
+                padding: ${DEVICE_TYPE === 'mobile' ? '16px' : '12px 16px'};
                 background: var(--duck-primary);
                 border: 1px solid var(--duck-border);
-                border-radius: ${isMobile ? '12px' : '8px'};
+                border-radius: 8px;
                 color: var(--duck-text);
-                font-size: var(--duck-font-size);
+                font-size: calc(var(--duck-font-size) - 1px);
                 z-index: 1000000;
-                transform: translateY(${isMobile ? '-100px' : 'translateX(400px)'});
+                transform: translateX(${DEVICE_TYPE === 'mobile' ? '0' : '400px'});
                 opacity: 0;
                 transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                 box-shadow: var(--duck-shadow);
-                max-width: ${isMobile ? 'calc(100vw - 20px)' : '300px'};
-                word-wrap: break-word;
+                text-align: ${DEVICE_TYPE === 'mobile' ? 'center' : 'left'};
             }
 
             .duck-notification-show {
-                transform: ${isMobile ? 'translateY(0)' : 'translateX(0)'};
+                transform: translateX(0);
                 opacity: 1;
             }
 
@@ -1663,177 +1689,91 @@
                 color: #ff6b6b;
             }
 
-            /* Enhanced Mobile Responsiveness */
-            @media (max-width: 480px) {
-                .duck-main-ui {
-                    position: fixed !important;
-                    left: 10px !important;
-                    right: 10px !important;
-                    top: 10px !important;
-                    width: calc(100vw - 20px) !important;
-                    max-width: none !important;
-                    min-width: none !important;
-                    max-height: calc(100vh - 20px) !important;
-                }
-
-                .duck-content {
-                    max-height: calc(100vh - 200px) !important;
-                }
-
-                .duck-header h2 {
-                    font-size: 14px !important;
-                }
-
-                .duck-control-btn {
-                    min-width: 40px !important;
-                    min-height: 40px !important;
-                    font-size: 14px !important;
-                }
-
-                .duck-minimized {
-                    left: 10px !important;
-                    top: 10px !important;
-                    width: 80px !important;
-                    height: 45px !important;
-                }
+            /* Device-specific optimizations */
+            ${DEVICE_TYPE === 'mobile' ? `
+            /* Mobile-specific styles */
+            .duck-main-ui {
+                border-radius: 16px 16px 0 0;
+                bottom: 0;
+                top: auto;
+                left: 0;
+                width: 100vw;
+                max-width: none;
+                max-height: 70vh;
             }
 
-            @media (max-width: 768px) and (orientation: landscape) {
-                .duck-main-ui {
-                    max-height: 90vh !important;
-                }
-                
-                .duck-content {
-                    max-height: calc(90vh - 180px) !important;
-                }
+            .duck-content {
+                max-height: calc(70vh - 120px);
             }
 
-            /* Tablet specific optimizations */
-            @media (min-width: 481px) and (max-width: 1024px) {
-                .duck-main-ui {
-                    width: min(500px, calc(100vw - 40px)) !important;
-                    left: 20px !important;
-                    top: 20px !important;
-                    max-height: calc(100vh - 40px) !important;
-                }
-
-                .duck-content {
-                    max-height: calc(100vh - 220px) !important;
-                }
+            .duck-minimized {
+                bottom: 20px;
+                top: auto;
+                right: 20px;
+                left: auto;
             }
 
-            /* Dark mode improvements for OLED screens */
-            @media (prefers-color-scheme: dark) {
-                :root {
-                    --duck-primary: rgba(8, 8, 8, 0.95);
-                    --duck-secondary: rgba(15, 15, 15, 0.9);
-                }
-            }
-
-            /* High contrast mode support */
-            @media (prefers-contrast: high) {
-                :root {
-                    --duck-border: rgba(255, 255, 255, 0.3);
-                    --duck-accent: #66bb6a;
-                }
-                
-                .duck-control-btn {
-                    border: 1px solid var(--duck-border);
-                }
-            }
-
-            /* Reduced motion support */
-            @media (prefers-reduced-motion: reduce) {
-                * {
-                    animation-duration: 0.01ms !important;
-                    animation-iteration-count: 1 !important;
-                    transition-duration: 0.01ms !important;
-                }
-            }
-
-            /* Focus indicators for accessibility */
-            .duck-control-btn:focus,
-            .duck-tab:focus,
-            .duck-btn-primary:focus,
-            .duck-btn-secondary:focus {
-                outline: 2px solid var(--duck-accent);
-                outline-offset: 2px;
-            }
-
-            /* Loading states */
-            .duck-btn-primary:disabled {
-                position: relative;
+            /* Prevent body scroll when UI is open */
+            body.duck-mobile-open {
                 overflow: hidden;
-            }
-
-            .duck-btn-primary:disabled::after {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: -100%;
+                position: fixed;
                 width: 100%;
                 height: 100%;
-                background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-                animation: loading-shimmer 1.5s infinite;
+            }
+            ` : ''}
+
+            /* Tablet optimizations */
+            ${DEVICE_TYPE === 'tablet' ? `
+            .duck-main-ui {
+                width: 500px;
+                max-height: 80vh;
             }
 
-            @keyframes loading-shimmer {
-                0% { left: -100%; }
-                100% { left: 100%; }
+            .duck-content {
+                max-height: calc(80vh - 140px);
             }
+            ` : ''}
 
-            /* Improved touch feedback */
-            .duck-control-btn:active,
-            .duck-tab:active,
-            .duck-btn-primary:active:not(:disabled),
-            .duck-btn-secondary:active,
-            .duck-history-item:active,
-            .duck-minimized:active {
-                transform: scale(0.95);
-                transition: transform 0.1s ease;
-            }
-
-            /* Better text selection on mobile */
-            .duck-result {
-                -webkit-user-select: text;
-                -moz-user-select: text;
-                -ms-user-select: text;
-                user-select: text;
-            }
-
-            .duck-header,
-            .duck-tabs,
-            .duck-control-btn,
-            .duck-minimized {
-                -webkit-user-select: none;
-                -moz-user-select: none;
-                -ms-user-select: none;
-                user-select: none;
-            }
-
-            /* Prevent text scaling on iOS */
-            .duck-main-ui,
-            .duck-minimized {
-                -webkit-text-size-adjust: 100%;
-                text-size-adjust: 100%;
-            }
-
-            /* Safe area support for notched devices */
-            @supports (padding: max(0px)) {
+            /* High DPI display optimizations */
+            @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
                 .duck-main-ui {
-                    padding-left: max(0px, env(safe-area-inset-left));
-                    padding-right: max(0px, env(safe-area-inset-right));
+                    border-width: 0.5px;
                 }
-                
-                .duck-minimized {
-                    left: max(10px, env(safe-area-inset-left));
-                    top: max(10px, env(safe-area-inset-top));
+
+                .duck-control-btn svg {
+                    width: ${DEVICE_TYPE === 'mobile' ? '22px' : '18px'};
+                    height: ${DEVICE_TYPE === 'mobile' ? '22px' : '18px'};
                 }
-                
-                .duck-notification {
-                    left: max(10px, env(safe-area-inset-left));
-                    right: max(10px, env(safe-area-inset-right));
-                    top: max(10px, env(safe-area-inset-top));
+            }
+
+            /* Landscape mobile optimization */
+            @media screen and (max-height: 500px) and (orientation: landscape) {
+                .duck-main-ui {
+                    max-height: 90vh;
+                    top: 5vh;
+                    bottom: auto;
+                }
+
+                .duck-content {
+                    max-height: calc(90vh - 100px);
+                }
+            }
+
+            /* Dark mode adjustments for better contrast on mobile */
+            @media (prefers-color-scheme: dark) {
+                .duck-main-ui {
+                    backdrop-filter: blur(30px);
+                }
+            }
+
+            /* Reduce motion for users who prefer it */
+            @media (prefers-reduced-motion: reduce) {
+                .duck-main-ui,
+                .duck-minimized,
+                .duck-notification,
+                .duck-tab-content {
+                    animation: none;
+                    transition: none;
                 }
             }
             `;
