@@ -1,0 +1,131 @@
+// ==UserScript==
+// @name          Exam Bypass
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Bypass HẾT
+// @match        *://*/*
+// @run-at       document-start
+// ==/UserScript==
+
+(() => {
+  'use strict';
+
+  const BLOCK_EVENTS = new Set([
+    'visibilitychange', 'pagehide', 'freeze',
+    'blur', 'focusout', 'focusin',
+    'mouseleave', 'mouseout', 'pointerleave',
+    'beforeunload',
+    'fullscreenchange', 'fullscreenerror',
+  ]);
+
+  const captureBlocker = (ev) => {
+    if (BLOCK_EVENTS.has(ev.type)) {
+      ev.stopImmediatePropagation();
+      ev.stopPropagation();
+    }
+  };
+
+  const installCaptureBlockers = () => {
+    BLOCK_EVENTS.forEach(type => {
+      window.addEventListener(type, captureBlocker, true);
+      document.addEventListener(type, captureBlocker, true);
+    });
+  };
+
+  const hardPatchPresence = () => {
+    try {
+      document.hasFocus = () => true;
+
+      const visFalse = { get: () => false, configurable: true };
+      const visVisible = { get: () => 'visible', configurable: true };
+
+      Object.defineProperty(document, 'hidden', visFalse);
+      Object.defineProperty(document, 'webkitHidden', visFalse);
+      Object.defineProperty(document, 'msHidden', visFalse);
+
+      Object.defineProperty(document, 'visibilityState', visVisible);
+      Object.defineProperty(document, 'webkitVisibilityState', visVisible);
+
+      const fsTrue = { get: () => true, configurable: true };
+      const fsElement = { get: () => document.documentElement, configurable: true };
+
+      Object.defineProperty(document, 'fullscreen', fsTrue);
+      Object.defineProperty(document, 'fullscreenElement', fsElement);
+      Object.defineProperty(document, 'webkitFullscreenElement', fsElement);
+      Object.defineProperty(document, 'mozFullScreenElement', fsElement);
+      Object.defineProperty(document, 'msFullscreenElement', fsElement);
+
+      document.exitFullscreen = async () => undefined;
+      document.webkitExitFullscreen = async () => undefined;
+      document.msExitFullscreen = async () => undefined;
+
+const noopPromise = async () => undefined;
+
+if (Element.prototype.requestFullscreen) {
+    Element.prototype.requestFullscreen = noopPromise;
+}
+
+if (Element.prototype.webkitRequestFullscreen) {
+    Element.prototype.webkitRequestFullscreen = noopPromise;
+}
+
+if (Element.prototype.msRequestFullscreen) {
+    Element.prototype.msRequestFullscreen = noopPromise;
+}
+
+      for (const key of ['onbeforeunload', 'onunload']) {
+        Object.defineProperty(window, key, {
+          configurable: true,
+          get: () => null,
+          set: () => {}
+        });
+      }
+    } catch (e) {
+      console.log('[MyAloha-Bypass] Patch error:', e);
+    }
+  };
+
+  const patchAddEventListener = () => {
+    const patchOne = (target) => {
+      const orig = target.addEventListener;
+      if (!orig || orig.__patched__) return;
+      function wrapped(type, listener, options) {
+        if (BLOCK_EVENTS.has(type)) return;
+        return orig.call(this, type, listener, options);
+      }
+      wrapped.__patched__ = true;
+      target.addEventListener = wrapped;
+    };
+    patchOne(window);
+    patchOne(document);
+    patchOne(EventTarget.prototype);
+  };
+
+  const keepAlive = () => {
+    try {
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      document.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 100, clientY: 100 }));
+    } catch {}
+  };
+
+  const mo = new MutationObserver(() => {
+    patchAddEventListener();
+  });
+
+  const startObserver = () => {
+    mo.observe(document.documentElement || document, {
+      childList: true,
+      subtree: true
+    });
+  };
+
+  installCaptureBlockers();
+  hardPatchPresence();
+  patchAddEventListener();
+  startObserver();
+
+  setInterval(keepAlive, 2000);
+
+})();
